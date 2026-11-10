@@ -1,0 +1,19 @@
+experiment_id: stage4_example_not_executed
+status: planned
+task: pd_cognitive_impairment_current_moca
+model: selective_fusion_tbd
+dataset: PD-EEG
+cohort_version: TBD
+label_definition: TBD
+split:
+  unit: subject
+  n_folds: 5
+  seed: 42
+metrics:
+  - auroc
+  - auprc
+  - f1
+perturbations:
+  - missing
+  - opposite_class_swap
+note: "Illustrative metadata only; not used to reproduce reported metrics."

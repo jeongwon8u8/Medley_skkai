@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+# Credentials and notebooks
+.env
+.env.*
+!.env.example
+.ipynb_checkpoints/
+# Data and protected research artifacts
+/data/
+/datasets/
+/artifacts/
+/outputs/
+/checkpoints/
+/runs/
+/wandb/
+/mlruns/
+*.edf
+*.bdf
+*.fif
+*.set
+*.vhdr
+*.eeg
+*.npy
+*.npz
+*.parquet
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+# Clinical data files: explicitly allow only synthetically authored sample fixtures if needed
+*.csv
+*.tsv
+*.xlsx
+*.xls
+# Editor/os
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
