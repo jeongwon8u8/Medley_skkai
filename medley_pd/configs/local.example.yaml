@@ -1,0 +1,14 @@
+# 개인 설정 예시 — configs/local.yaml 로 복사해서 각자 경로를 적으세요 (local.yaml 은 GitHub 에 올라가지 않음)
+# `python run.py setup --work <작업 폴더> --data <데이터 폴더>` 를 실행하면 자동으로 만들어집니다.
+paths:
+  data_root: /content/data                                  # EEG 원본 (빠른 로컬 디스크 권장)
+  feature_root: /content/drive/MyDrive/medley_work/features # 피처 캐시
+  result_root: /content/drive/MyDrive/medley_work/results   # 결과
+  # split_root 는 지정하지 마세요 — 저장소의 splits/ 를 팀 전체가 같이 씁니다
+encoders:
+  cbramod:
+    repo: /content/drive/MyDrive/medley_work/models/CBraMod
+    weights: /content/drive/MyDrive/medley_work/models/CBraMod/pretrained_weights.pth
+  scerebro:
+    repo: /content/drive/MyDrive/medley_work/models/BioFoundation
+    weights: /content/drive/MyDrive/medley_work/models/S-CEReBrO/S_CEReBrO.safetensors

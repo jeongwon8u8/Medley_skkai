@@ -1,0 +1,40 @@
+# Iowa Rest (Anjum et al., 2024 / Narayanan lab)
+# 확인됨(2026-11-12 inspect): PD 100 / Control 49, PD 전원 MoCA·UPDRS 있음, 열 이름 아래와 일치
+# 기록 길이: PD 100명 5초 구간 24~68개, 대부분 24~37개(2~3분, README 의 '2분'과 대체로 일치). 이벤트는 시작 boundary 뿐 → 파일 전체 사용
+# PD-EEG(48구간)와 길이를 맞춘 기관 간 비교는 evaluation.max_segments=24 (모든 PD 가 24구간 이상)
+# 주의: TYPE 열은 GROUP 과 같은 값(PD=1, Control=0) → 정답 라벨이므로 입력 금지 (columns 에 넣지 않음)
+#       UPDRS 는 버전·Part 미확인 (평균 12.5, 최대 28 로 PD-EEG Part III 의 절반 수준) → updrs_iowa 로 분리
+# 확인됨(sub-001 eeg.json): EEGReference Pz, EEGGround AFz, 63채널, 500 Hz, 60 Hz 전원 → 19채널 중 Pz 만 없어 보간
+name: iowa_rest
+dir: ds004584
+openneuro: {id: ds004584, tag: 1.0.0}
+download_include: ["participants.tsv", "participants.json", "dataset_description.json", "*task-[Rr]est*", "*task-rest*"]
+participants: participants.tsv
+
+file_pattern: "{sid}_*task-rest*_eeg.*"   # 대소문자 무시
+file_ext: [set, edf, bdf, vhdr, fif]
+condition: EO                  # Iowa 안정 상태는 눈 뜸
+line_freq: 60                  # 미국 → 60 Hz 노치 (0.3–75 Hz 대역 안이라 반드시 필요)
+ref_aliases: []
+reference: PZ                  # eeg.json EEGReference = Pz (S-CEReBrO 전극 좌표용). 기록에 Pz 채널이 없어 보간됨
+
+columns:
+  subject: participant_id
+  group: GROUP                 # inspect로 확인
+  age: AGE
+  sex: GENDER
+  moca: MOCA
+  updrs_iowa: UPDRS            # 버전·Part 확인 전까지는 PD-EEG updrs_part_iii 와 다른 이름으로 둠
+
+patient_regex: "PD|PARK"
+subgroup: null
+sex_map: null
+
+# 이 데이터셋에서 쓸 clinical set (과제 기본값 대신 사용). 없는 변수는 넣지 않음
+clinical_sets:
+  moca:
+    C0: [age, sex]
+    C1_iowa: [age, sex, updrs_iowa]
+  moca_impaired:
+    C0: [age, sex]
+    C1_iowa: [age, sex, updrs_iowa]

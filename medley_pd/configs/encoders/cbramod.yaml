@@ -1,0 +1,11 @@
+# frozen CBraMod — 기존 TDBRAIN·Mumtaz·PD-EEG와 같은 입력 사양
+name: cbramod
+type: cbramod
+fs: 200                        # 리샘플링 목표
+seg_sec: 5                     # 5초 비중첩 구간 → 1초(200샘플) 패치 5개
+amp_div: 100.0                 # μV / 100
+channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, P7, P3, Pz, P4, P8, O1, O2]
+repo: null                     # wjq-learning/CBraMod 클론 경로 (null 이면 braindecode 버전 사용 시도)
+weights: null                  # pretrained_weights.pth 경로
+batch_size: 64
+# 출력: [N, 19, 5, 200] → 패치 평균 → 19×200 = 3,800차원
