@@ -18,7 +18,8 @@ def test_default_sets_match_task_yaml(ds):
     from medley.config import load_config
     from medley.participants import clinical_sets
     cfg = build_cfg(load_json(os.path.join(C, f"train_config_{ds}.json")))
-    assert clinical_sets(cfg) == clinical_sets(load_config(ds, "cbramod", "moca_impaired"))
+    assert clinical_sets(cfg) == clinical_sets(load_config(ds, "cbramod", cfg["task"]["name"]))
+    assert cfg["task"]["name"] == "moca"
     assert cfg["models"]["fusion"] == ["stack", "concat"]
 
 
@@ -26,7 +27,7 @@ def test_variable_off_and_guards():
     p = os.path.join(C, "train_config_pd_eeg.json")
     cfg = build_cfg(load_json(p, overrides=["clinical_sets.C1.ledd=false", "models.fusion.concat=false",
                                             "encoder=scerebro", "max_segments=24"]))
-    sets = cfg["dataset"]["clinical_sets"]["moca_impaired"]
+    sets = cfg["dataset"]["clinical_sets"]["moca"]
     assert "ledd" not in sets["C1"] and "ledd" in sets["C2"]
     assert cfg["models"]["fusion"] == ["stack"] and cfg["encoder"]["name"] == "scerebro"
     assert cfg["evaluation"]["max_segments"] == 24
@@ -35,7 +36,9 @@ def test_variable_off_and_guards():
         with pytest.raises(SystemExit):
             build_cfg(load_json(p, overrides=bad))
     cfg = build_cfg(load_json(p, overrides=["clinical_sets.C0.updrs_total=true", "allow_excluded=true"]))
-    assert "updrs_total" in cfg["dataset"]["clinical_sets"]["moca_impaired"]["C0"]
+    assert "updrs_total" in cfg["dataset"]["clinical_sets"]["moca"]["C0"]
+    cfg = build_cfg(load_json(p, overrides=["task=moca_impaired"]))
+    assert cfg["task"].get("type") == "classification"
 
 
 def test_iowa_reference_is_pz():

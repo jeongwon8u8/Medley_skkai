@@ -1,9 +1,9 @@
 {
-  "_설명": "Iowa Rest, PD 환자 안 인지저하 분류 (MoCA < 26). 기준전극 Pz 는 configs/datasets/iowa_rest.yaml 에 고정됨",
+  "_설명": "Iowa Rest, PD 환자 안 MoCA 점수 예측 (회귀). 인지저하 분류는 task=moca_impaired. 기준전극 Pz 는 configs/datasets/iowa_rest.yaml 에 고정됨",
   "_변수": "age, sex: 기본 정보 / updrs_iowa: UPDRS (버전·Part 미확인이라 PD-EEG 와 다른 이름)",
   "dataset": "iowa_rest",
   "encoder": "cbramod",
-  "task": "moca_impaired",
+  "task": "moca",
   "experiment_name": "main",
   "overwrite": false,
   "seeds": null,

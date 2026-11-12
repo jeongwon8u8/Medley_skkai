@@ -65,7 +65,7 @@ COMMON = {
 TRAIN_KEYS = {
     "dataset": None,              # pd_eeg | iowa_rest
     "encoder": None,              # cbramod | scerebro (bash 에서 두 번째 인자로 바꿀 수 있음)
-    "task": "moca_impaired",      # moca_impaired (분류) | moca (회귀) | ctt (회귀)
+    "task": "moca",               # moca (MoCA 점수 회귀, 주 과제) | moca_impaired (MoCA < 26 분류) | ctt (회귀)
     "experiment_name": "main",    # 결과 폴더 이름. 같은 이름을 인코더마다 두면 test 가 인코더끼리 비교
     "overwrite": False,           # 같은 이름의 결과가 있으면 기본은 중단
     "seeds": None,                # None 이면 COMMON 의 seed 0~9
@@ -82,7 +82,7 @@ TRAIN_KEYS = {
 
 TEST_KEYS = {
     "dataset": None,
-    "task": "moca_impaired",
+    "task": "moca",               # 학습 때와 같은 과제
     "experiment_name": "main",    # 평가할 실험 이름
     "max_segments": None,         # 학습 때 max_segments 를 썼다면 같은 값
     "encoders": ["cbramod", "scerebro"],   # 평가할 인코더. 2개 이상이면 첫 인코더 기준으로 짝지은 비교

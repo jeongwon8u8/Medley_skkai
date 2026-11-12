@@ -186,17 +186,28 @@ def plot_probabilities(case, models, names01, out, title):
 
 
 def plot_pred_vs_true(case, models, out, title):
-    """회귀: 실제 vs 예측 (seed 평균)"""
+    """회귀: 실제 vs 예측 (seed 평균). 모델마다 칸 하나, 한 줄에 4칸"""
     plt = _plt()
     n = len(models)
-    fig, axes = plt.subplots(1, n, figsize=(3.0 * n, 3.1), squeeze=False)
+    ncol = min(4, n)
+    nrow = int(np.ceil(n / ncol))
+    fig, axes = plt.subplots(nrow, ncol, figsize=(3.0 * ncol, 3.0 * nrow + 0.4), squeeze=False)
     lo, hi = case.y.min() - 1, case.y.max() + 1
-    for ax, m in zip(axes[0], models):
+    for i, ax in enumerate(axes.flat):
+        if i >= n:
+            ax.axis("off")
+            continue
+        m = models[i]
         ax.plot([lo, hi], [lo, hi], color=GRID, lw=1)
         ax.scatter(case.y, case[f"yhat_{m}"], s=12, color=KIND_COLOR[kind_of(m)], edgecolor="white", linewidth=0.4)
-        ax.set_title(m, loc="left", fontsize=9)
-        ax.set_xlabel(_t("실제", "true"))
-    axes[0][0].set_ylabel(_t("예측", "predicted"))
+        mae = (case[f"yhat_{m}"] - case.y).abs().mean()
+        ax.set_title(f"{m}  MAE {mae:.2f}", loc="left", fontsize=8)
+        ax.set_xlim(lo, hi)
+        ax.set_ylim(lo, hi)
+        if i // ncol == nrow - 1 or i + ncol >= n:
+            ax.set_xlabel(_t("실제", "true"))
+        if i % ncol == 0:
+            ax.set_ylabel(_t("예측", "predicted"))
     fig.suptitle(title, x=0.01, ha="left", fontsize=10)
     fig.tight_layout()
     fig.savefig(out)

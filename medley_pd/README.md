@@ -136,18 +136,27 @@ bash scripts/test.sh  pd_eeg experiment_name=no_ledd
 
 **결합 방식 켜기/끄기** — `"models": {"fusion": {"stack": true, "concat": true}}`. 새 결합 모델은 `medley/fusion.py` 에 등록한 뒤 여기에 `"이름": true`. `concat` 의 PCA 차원은 `fusion_params.concat_pca`.
 
-**결과** — `results/<dataset>/moca_impaired/<encoder>/<experiment_name>/`
+**과제** — 기본은 **MoCA 점수 예측(회귀, `task: moca`)** 입니다. 지표는 MAE(주), RMSE, R², Spearman. 인지저하 분류(MoCA < 26)는 `task=moca_impaired` 로 바꾸면 같은 구조로 돌아갑니다 (지표 AUROC 등).
+```bash
+bash scripts/train.sh pd_eeg cbramod                         # 회귀 (기본)
+bash scripts/train.sh pd_eeg cbramod task=moca_impaired      # 분류
+bash scripts/test.sh  pd_eeg task=moca_impaired              # 평가도 같은 과제로
+```
+과제마다 split 파일이 따로 있습니다 (`splits/<dataset>__moca.csv`, `splits/<dataset>__moca_impaired.csv`).
+
+**결과** — `results/<dataset>/<task>/<encoder>/<experiment_name>/`
 - `predictions.csv.gz`, `subjects.csv`, `config_used.yaml` (train)
 - `test/summary.csv`, `paired.csv`, `metrics_per_seed.csv`, `subgroup.csv`, `per_case.csv`, `figures/*.png` (test)
-- 인코더 비교: `results/<dataset>/moca_impaired/compare_<실험>_cbramod_vs_scerebro.csv / .png`
+- 인코더 비교: `results/<dataset>/<task>/compare_<실험>_cbramod_vs_scerebro.csv / .png`
+- 그림: 회귀는 `mae_by_model.png`, `paired.png`, `pred_vs_true.png` / 분류는 `auroc_by_model.png`, `paired.png`, `roc_<조합>.png`, `probabilities.png`
 - 순열 검정: test JSON 의 `permtest.label` / `permtest.eeg` 를 `true` (오래 걸림)
 - `per_case.csv` 에는 환자 ID 가 있어 GitHub 에 올리지 않습니다. `python run.py collect` 도 가져가지 않습니다.
 
-**결과 읽을 때 주의** — `mean` 기준선의 AUROC 가 0.5 보다 낮게(약 0.4) 나오는 것은 버그가 아닙니다. `mean` 은 fold 마다 "학습 fold 의 인지저하 비율"을 모든 환자에게 똑같이 예측하는데, 평가 fold 에 양성이 많으면 학습 fold 에는 적어서 예측이 낮아지므로 fold 를 모아 AUROC 를 계산하면 0.5 아래로 치우칩니다. 찍는 수준은 0.5 로 보고, `eeg vs mean` 비교는 이 점을 감안해 읽습니다.
+**결과 읽을 때 주의 (분류)** — `mean` 기준선의 AUROC 가 0.5 보다 낮게(약 0.4) 나오는 것은 버그가 아닙니다. `mean` 은 fold 마다 "학습 fold 의 인지저하 비율"을 모든 환자에게 똑같이 예측하는데, 평가 fold 에 양성이 많으면 학습 fold 에는 적어서 예측이 낮아지므로 fold 를 모아 AUROC 를 계산하면 0.5 아래로 치우칩니다. 찍는 수준은 0.5 로 보고, `eeg vs mean` 비교는 이 점을 감안해 읽습니다.
 
 **그림의 한글** — 한글 글꼴이 없는 환경(Colab 기본)에서는 그림 글자가 자동으로 영어로 나옵니다. 한글로 보려면 Colab 에서 `!apt-get -qq install -y fonts-nanum` 후 런타임을 다시 시작하세요.
 
-**원본 `run.py cv` 와 같은 결과인지** — 가짜 데이터(PD-EEG·Iowa 형식, 두 인코더, seed 3개)로 `run.py cv/compare/permtest` 와 `train.sh`·`test.sh` 를 돌려 비교: 예측값 차이 0, summary·paired·compare·permtest 모두 같음. `tests/smoke_test.py` 도 통과.
+**원본 `run.py cv` 와 같은 결과인지** — 가짜 데이터(PD-EEG·Iowa 형식, 두 인코더, seed 3개, 회귀 `moca`·분류 `moca_impaired` 모두)로 `run.py cv/compare/permtest` 와 `train.sh`·`test.sh` 를 돌려 비교: 예측값 차이 0, summary·paired·compare·permtest 모두 같음. `tests/smoke_test.py` 도 통과.
 
 ## 실행 (기존 run.py)
 
