@@ -1,0 +1,64 @@
+{
+  "_설명": "PD-EEG, PD 환자 안 인지저하 분류 (MoCA < 26). clinical_sets 의 조합마다 clinical-only 와 결합 모델이 만들어지고, 같은 split 에서 짝지어 비교됨",
+  "_변수": "age, sex: 기본 정보 / updrs_part_iii, disease_duration, ledd, pigd_score, td_score: 운동·질병 정보 / ctt, updrs_total: 과제가 입력 금지로 정한 변수 (allow_excluded=true 일 때만 켤 수 있음, 누출 확인용)",
+  "dataset": "pd_eeg",
+  "encoder": "cbramod",
+  "task": "moca_impaired",
+  "experiment_name": "main",
+  "overwrite": false,
+  "seeds": null,
+  "max_segments": null,
+  "models": {
+    "baselines": {
+      "mean": true,
+      "noise": true
+    },
+    "eeg": true,
+    "clinical": true,
+    "fusion": {
+      "stack": true,
+      "concat": true
+    }
+  },
+  "fusion_params": {
+    "concat_pca": 32
+  },
+  "clinical_sets": {
+    "C0": {
+      "age": true,
+      "sex": true,
+      "updrs_part_iii": false,
+      "disease_duration": false,
+      "ledd": false,
+      "pigd_score": false,
+      "td_score": false,
+      "ctt": false,
+      "updrs_total": false
+    },
+    "C1": {
+      "age": true,
+      "sex": true,
+      "updrs_part_iii": true,
+      "disease_duration": true,
+      "ledd": true,
+      "pigd_score": false,
+      "td_score": false,
+      "ctt": false,
+      "updrs_total": false
+    },
+    "C2": {
+      "age": true,
+      "sex": true,
+      "updrs_part_iii": true,
+      "disease_duration": true,
+      "ledd": true,
+      "pigd_score": true,
+      "td_score": true,
+      "ctt": false,
+      "updrs_total": false
+    }
+  },
+  "allow_excluded": false,
+  "limit": null,
+  "include_controls": false
+}

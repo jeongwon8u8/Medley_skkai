@@ -1,0 +1,18 @@
+# 실험 ① — PD 환자 안에서 현재 MoCA(연속값) 추정
+name: moca
+target: moca
+transform: none                # none | log
+patients_only: true
+
+# 입력에서 절대 쓰면 안 되는 변수 (target 자신은 자동 제외)
+exclude: [moca, ctt, updrs_total]   # updrs_total은 Part I(인지 문항) 포함 가능
+
+# 기본 clinical set (데이터셋 yaml 의 clinical_sets.moca 가 있으면 그걸 사용)
+clinical_sets:
+  C0: [age, sex]
+  C1: [age, sex, updrs_part_iii, disease_duration, ledd]
+  C2: [age, sex, updrs_part_iii, disease_duration, ledd, pigd_score, td_score]
+
+# 기관 간 검증에서 쓸 공통 set (UPDRS 대응 확인 전에는 C0만)
+cross_site_sets:
+  C0: [age, sex]

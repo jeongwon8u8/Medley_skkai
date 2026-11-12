@@ -1,0 +1,14 @@
+# 실험 ② — CTT 예측 (⑤-A: MoCA 없이 / ⑤-B: MoCA를 알고 있을 때)
+# ⚠ 공개 `ctt` 열의 정의(CTT1/CTT2, 시간 단위 등)를 확인한 뒤 target·transform 을 확정하세요.
+name: ctt
+target: ctt
+transform: log                 # 수행 시간이면 치우친 분포 → log. 지표는 원래 단위로 계산
+patients_only: true
+
+exclude: [ctt, updrs_total]
+
+clinical_sets:
+  C1: [age, sex, updrs_part_iii, disease_duration, ledd]                 # ⑤-A
+  C1_moca: [age, sex, updrs_part_iii, disease_duration, ledd, moca]      # ⑤-B: 핵심 비교 = clinical:C1_moca vs fusion:C1_moca
+
+cross_site_sets: {}
