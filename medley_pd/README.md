@@ -152,6 +152,12 @@ bash scripts/test.sh  pd_eeg task=moca_impaired              # 평가도 같은 
 - 순열 검정: test JSON 의 `permtest.label` / `permtest.eeg` 를 `true` (오래 걸림)
 - `per_case.csv` 에는 환자 ID 가 있어 GitHub 에 올리지 않습니다. `python run.py collect` 도 가져가지 않습니다.
 
+**임상변수 상관 히트맵** — 분석 대상 PD 환자의 임상변수·MoCA 사이 Spearman 상관. 학습 결과가 있으면 "EEG 예측 MoCA"(EEG-only 모델의 seed 평균 예측)도 함께 그려, EEG 가 나이 같은 임상정보를 대신 잡는지 볼 수 있습니다.
+```bash
+python corr_heatmap.py pd_eeg        # → results/pd_eeg/correlation/clinical_corr.png, clinical_corr.csv
+python corr_heatmap.py iowa_rest
+```
+
 **결과 읽을 때 주의 (분류)** — `mean` 기준선의 AUROC 가 0.5 보다 낮게(약 0.4) 나오는 것은 버그가 아닙니다. `mean` 은 fold 마다 "학습 fold 의 인지저하 비율"을 모든 환자에게 똑같이 예측하는데, 평가 fold 에 양성이 많으면 학습 fold 에는 적어서 예측이 낮아지므로 fold 를 모아 AUROC 를 계산하면 0.5 아래로 치우칩니다. 찍는 수준은 0.5 로 보고, `eeg vs mean` 비교는 이 점을 감안해 읽습니다.
 
 **그림의 한글** — 한글 글꼴이 없는 환경(Colab 기본)에서는 그림 글자가 자동으로 영어로 나옵니다. 한글로 보려면 Colab 에서 `!apt-get -qq install -y fonts-nanum` 후 런타임을 다시 시작하세요.
