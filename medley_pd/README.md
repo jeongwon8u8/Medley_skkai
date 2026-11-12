@@ -43,6 +43,29 @@ notebooks/iowa_2x2.ipynb   Iowa 구조 확인 → 두 인코더 → 누출 점�
 tests/smoke_test.py         가짜 데이터로 평가 파이프라인 점검 (GPU·EEG 파일 불필요)
 ```
 
+## medley_pd 사용 시 반드시 지켜야 할 규칙
+
+1. 분할 파일(splits/)은 새로 만들지 않습니다.
+--new-splits 옵션을 사용하지 않으며, splits/ 폴더의 CSV 파일을 수정하거나 삭제하지 않습니다. 모든 실험이 같은 환자 분할을 사용해야 모델 간 성능을 짝지어 비교할 수 있습니다. 분할이 하나라도 다르면 그 결과는 다른 결과와 비교할 수 없습니다.
+
+2. 환자 관련 파일은 GitHub에 올리지 않습니다.
+per_case.csv, predictions.csv.gz, subjects.csv, participants.tsv, EEG 원본, 특징 파일(.npz), 개인 설정 파일(configs/local.yaml)은 올리지 않습니다. 이 파일들에는 환자 ID, 임상정보, 개인 경로가 포함되어 있습니다. 결과를 공유할 때는 python run.py collect로 모은 요약 파일만 올립니다.
+
+3. 공통 설정(configs/config.py)은 팀 합의 없이 변경하지 않습니다.
+필터 대역, fold 수, seed, 규제 범위 등 공통값은 팀이 합의한 경우에만 변경합니다. 실험마다 달라지는 조건은 train_config_<데이터셋>.json에서만 조정합니다. 공통값을 개인적으로 바꾸면 해당 결과는 팀의 다른 결과와 비교할 수 없게 됩니다.
+
+4. 실험마다 고유한 experiment_name을 지정합니다.
+experiment_name=no_ledd처럼 실험 조건을 알 수 있는 이름을 정합니다. 같은 이름을 사용하면 기존 결과를 덮어쓰게 되므로, overwrite=true는 본인의 실험을 다시 실행할 때만 사용합니다.
+
+5. 코드는 main 브랜치에 직접 올리지 않고, 브랜치를 만들어 Pull request로 올립니다.
+새 브랜치에서 작업한 뒤 Pull request를 생성하고, 한 명 이상의 확인을 받은 후 병합합니다. 이를 통해 한 사람의 실수가 전체 코드에 바로 영향을 주는 것을 방지합니다.
+
+추가 권장 사항
+
+정답 변수(moca)나 입력 금지 변수(ctt, updrs_total)를 포함한 결과는 본 결과로 사용하지 않습니다. 코드는 기본적으로 이를 차단하며, allow_excluded=true는 누출 여부를 확인하는 용도로만 사용합니다.
+새 결합 모델은 medley/fusion.py에 등록하고, 같은 실행 안에서 stack, concat, 임상정보만 사용한 모델과 함께 비교합니다.
+
+
 ## 팀원 시작 가이드
 
 **Colab**: `notebooks/team_quickstart.ipynb` 를 열고 맨 위 `WORK`(내 작업 폴더)만 정한 뒤 위에서부터 실행하세요. 누구의 Drive 에도 의존하지 않습니다.
