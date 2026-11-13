@@ -130,6 +130,17 @@ pe = run_permtest(load_config("pd_eeg", "cbramod", "moca", ov), n_perm=9, mode="
 assert pe.model.str.contains(" − ").any() and not pe.model.str.startswith("clinical").any()
 run_cross_permtest(load_config("pd_eeg", "cbramod", "moca", ov), load_config("iowa_rest", "cbramod", "moca", ov), n_perm=9)
 
+print("\n################ 차트 교체 검사 (적은 횟수로 동작 확인)")
+from medley.swaptest import run_swaptest  # noqa: E402
+sw = run_swaptest(load_config("pd_eeg", "cbramod", "moca", ov), n_draws=3, seeds=[0])
+opp = sw[sw.cond == "opposite"].set_index("model")
+assert (sw["shift"] >= 0).all() and not sw.model.isin(["eeg", "mean"]).any(), "EEG-only·mean 은 차트를 쓰지 않음"
+assert (opp["shift"] > 0).all(), "차트를 바꾸면 차트를 쓰는 모델의 예측은 바뀌어야 함"
+assert opp.loc["clinical:C0", "dMAE"] > 0 and opp.loc["fusion_stack:C0", "dMAE"] > 0, "반대 그룹 차트는 오차를 늘려야 함"
+assert opp.loc["clinical:C0", "MAE_real"] == sw.set_index(["cond", "model"]).loc[("same", "clinical:C0"), "MAE_real"]
+swc = run_swaptest(load_config("pd_eeg", "cbramod", "moca_impaired", ov), n_draws=3, seeds=[0])
+assert {"NFR", "dAUROC"} <= set(swc.columns) and swc.NFR.between(0, 1).all()
+
 print("\n################ local.yaml 병합 + collect")
 from medley.config import LOCAL  # noqa: E402
 assert not os.path.exists(LOCAL), "테스트 전에 configs/local.yaml 이 없어야 함"
