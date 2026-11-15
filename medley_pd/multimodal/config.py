@@ -47,10 +47,10 @@ _SCHEMA: JsonDict = {
     "llm": dict.fromkeys(("model_id", "revision", "tuning", "quantization", "compute_dtype",
                           "lora_r", "lora_alpha", "lora_dropout", "max_text_tokens")),
     "eeg": {
-        **dict.fromkeys(("encoder", "input_type", "feature_dim")),
+        **dict.fromkeys(("encoder", "input_type", "feature_dim", "seed")),
         "feature_adapter": dict.fromkeys(("enabled", "hidden_dim", "dropout")),
         "pooling": dict.fromkeys(("type", "num_queries", "hidden_dim", "num_heads")),
-        "projector": dict.fromkeys(("type", "layer_norm")),
+        "projector": dict.fromkeys(("type", "layer_norm", "output_dim")),
     },
     "fusion": dict.fromkeys(("type", "token_position", "numeric_skip", "uncertainty", "fusion_dim", "dropout")),
     "prediction": dict.fromkeys(("type", "hidden_dim", "dropout", "clip_range")),
@@ -78,6 +78,11 @@ def _with_optional_defaults(settings: Any) -> Any:
             result["clinical_regression"] = copy.deepcopy(CLINICAL_REGRESSION_DEFAULTS)
         elif isinstance(result["clinical_regression"], dict):
             result["clinical_regression"] = {**copy.deepcopy(CLINICAL_REGRESSION_DEFAULTS), **result["clinical_regression"]}
+        # A1 optional fields preserve earlier JSON and resolved snapshots.
+        if isinstance(result.get("eeg"), dict):
+            result["eeg"].setdefault("seed", 0)
+            if isinstance(result["eeg"].get("projector"), dict):
+                result["eeg"]["projector"].setdefault("output_dim", None)
     return result
 
 
@@ -226,6 +231,9 @@ def validate_config(settings: JsonDict) -> None:
     if settings["fusion"]["type"] != expected[settings["architecture"]]:
         raise ConfigError("architecture and fusion.type are incompatible")
     eeg = settings["eeg"]
+    _number(settings, "eeg.seed", integer=True, strict=False, maximum=2**32)
+    if eeg["projector"]["output_dim"] is not None:
+        _number(settings, "eeg.projector.output_dim", integer=True)
     if eeg["feature_dim"] != {"cbramod": 3800, "scerebro": 3420}[eeg["encoder"]]:
         raise ConfigError("eeg.feature_dim must match encoder: cbramod=3800, scerebro=3420")
     if eeg["pooling"]["hidden_dim"] % eeg["pooling"]["num_heads"]:
