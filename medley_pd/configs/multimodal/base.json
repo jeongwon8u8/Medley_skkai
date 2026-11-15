@@ -1,0 +1,57 @@
+{
+  "schema_version": 1,
+  "architecture": "fusion_b",
+  "experiment_name": "pd_multimodal_base",
+  "dataset": "pd_eeg",
+  "task": "moca",
+  "clinical_set": "C1",
+  "llm": {
+    "model_id": null,
+    "revision": null,
+    "tuning": "qlora",
+    "quantization": "nf4",
+    "compute_dtype": "bfloat16",
+    "lora_r": 8,
+    "lora_alpha": 16,
+    "lora_dropout": 0.05,
+    "max_text_tokens": 256
+  },
+  "eeg": {
+    "encoder": "cbramod",
+    "input_type": "cached_features",
+    "feature_dim": 3800,
+    "feature_adapter": {"enabled": false, "hidden_dim": 128, "dropout": 0.1},
+    "pooling": {"type": "attention", "num_queries": 4, "hidden_dim": 256, "num_heads": 4},
+    "projector": {"type": "linear", "layer_norm": true}
+  },
+  "fusion": {
+    "type": "soft_token",
+    "token_position": "prefix",
+    "numeric_skip": false,
+    "uncertainty": false,
+    "fusion_dim": 256,
+    "dropout": 0.1
+  },
+  "prediction": {"type": "regression", "hidden_dim": 256, "dropout": 0.1, "clip_range": [0, 30]},
+  "loss": {"primary": "huber", "huber_delta": 1.0, "auxiliary": false},
+  "training": {
+    "batch_size": 1,
+    "gradient_accumulation": 8,
+    "max_epochs": 30,
+    "early_stopping_patience": 5,
+    "lr_lora": 0.00002,
+    "lr_new_modules": 0.0001,
+    "weight_decay": 0.01,
+    "gradient_checkpointing": true,
+    "validation_fraction": 0.2,
+    "optimizer": "adamw",
+    "gradient_clip_norm": 1.0
+  },
+  "evaluation": {
+    "use_existing_splits": true,
+    "seeds": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9],
+    "n_folds": 5,
+    "folds": [1, 2, 3, 4, 5],
+    "save_per_case": true
+  }
+}
