@@ -41,6 +41,8 @@ CLINICAL_REGRESSION_DEFAULTS = {
     "prediction_suffix": "Predicted MoCA:", "head_type": "linear",
     "mixed_precision": "none", "random_seed": 0,
 }
+# Null group overrides inherit the existing new-module rate.
+FUSION_B_TRAINING_DEFAULTS = dict.fromkeys(("lr_pooling", "lr_projector", "lr_head", "lr_feature_adapter"))
 # Field names are a schema, not a second set of experiment/preprocessing values.
 _SCHEMA: JsonDict = {
     **dict.fromkeys(("schema_version", "architecture", "experiment_name", "dataset", "task", "clinical_set")),
@@ -63,6 +65,7 @@ _SCHEMA: JsonDict = {
 _SCHEMA["llm"].update(dict.fromkeys(LLM_RUNTIME_DEFAULTS))
 _SCHEMA["clinical_text"] = dict.fromkeys(CLINICAL_TEXT_DEFAULTS)
 _SCHEMA["clinical_regression"] = dict.fromkeys(CLINICAL_REGRESSION_DEFAULTS)
+_SCHEMA["fusion_b_training"] = dict.fromkeys(FUSION_B_TRAINING_DEFAULTS)
 
 
 def _with_optional_defaults(settings: Any) -> Any:
@@ -78,6 +81,10 @@ def _with_optional_defaults(settings: Any) -> Any:
             result["clinical_regression"] = copy.deepcopy(CLINICAL_REGRESSION_DEFAULTS)
         elif isinstance(result["clinical_regression"], dict):
             result["clinical_regression"] = {**copy.deepcopy(CLINICAL_REGRESSION_DEFAULTS), **result["clinical_regression"]}
+        if "fusion_b_training" not in result:
+            result["fusion_b_training"] = copy.deepcopy(FUSION_B_TRAINING_DEFAULTS)
+        elif isinstance(result["fusion_b_training"], dict):
+            result["fusion_b_training"] = {**FUSION_B_TRAINING_DEFAULTS, **result["fusion_b_training"]}
         # A1 optional fields preserve earlier JSON and resolved snapshots.
         if isinstance(result.get("eeg"), dict):
             result["eeg"].setdefault("seed", 0)
@@ -204,6 +211,9 @@ def validate_config(settings: JsonDict) -> None:
     _choice(settings, "clinical_regression.head_type", ("linear",))
     _choice(settings, "clinical_regression.mixed_precision", ("none", "bfloat16"))
     _number(settings, "clinical_regression.random_seed", integer=True, strict=False, maximum=2**32)
+    for key in FUSION_B_TRAINING_DEFAULTS:
+        if settings["fusion_b_training"][key] is not None:
+            _number(settings, f"fusion_b_training.{key}")
     name = settings["experiment_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
         raise ConfigError("experiment_name must be 1–128 ASCII letters/digits/underscores/hyphens, starting with a letter or digit")

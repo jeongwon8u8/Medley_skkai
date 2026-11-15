@@ -67,6 +67,14 @@ def _digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+def _config_digest(config):
+    # M3-only optional settings must not invalidate pre-A3 M1 checkpoints.
+    if config["settings"]["architecture"] == "clinical_only":
+        config = {**config, "settings": {k: v for k, v in config["settings"].items()
+                                        if k != "fusion_b_training"}}
+    return _digest(config)
+
+
 def _identity(model):
     backbone = model.backbone
     config = backbone.resolved_config.to_dict()
@@ -87,7 +95,7 @@ def _identity(model):
     tokenizer_identity = {"vocabulary": tokenizer.get_vocab(), "padding_side": tokenizer.padding_side,
                           "special_ids": [tokenizer.pad_token_id, tokenizer.bos_token_id, tokenizer.eos_token_id],
                           "backend": tokenizer.backend_tokenizer.to_str()}
-    return {"format": "medley_m1_inference_v1", "config_digest": _digest(config),
+    return {"format": "medley_m1_inference_v1", "config_digest": _config_digest(config),
             "base_config_digest": _digest(backbone.model.config.to_dict()),
             "tokenizer_digest": _digest(tokenizer_identity), "synthetic_frozen_digest": synthetic_hash,
             "model_id": llm["model_id"], "revision": llm["revision"], "mode": backbone.mode,
@@ -128,7 +136,7 @@ def load_inference_checkpoint(model: ClinicalLLMRegressor, path) -> dict:
         metadata = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
         saved_config = json.loads((path / "resolved_config.json").read_text(encoding="utf-8"))
         identity = _identity(model)
-        if (metadata["identity"] != identity or _digest(saved_config) != identity["config_digest"]
+        if (metadata["identity"] != identity or _config_digest(saved_config) != identity["config_digest"]
                 or hashlib.sha256((path / "trainable.safetensors").read_bytes()).hexdigest() != metadata["weights_sha256"]):
             raise ValueError("Incompatible or corrupted M1 inference checkpoint metadata")
         tensors = load_file(str(path / "trainable.safetensors"), device="cpu")

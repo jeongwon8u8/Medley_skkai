@@ -16,3 +16,7 @@ __pycache__/
 .ipynb_checkpoints/
 # 환자별 예측
 per_case.csv
+
+# Multimodal private prediction exports and inference checkpoint metadata
+/outputs/
+/checkpoints/

@@ -81,7 +81,7 @@ class ClinicalTrainer:
         self._ids(split.test_subjects)
         self.serializer = ClinicalTextSerializer(self.config)
         self.tokenizer = ClinicalTokenizer(model.backbone)
-        self.optimizer = build_optimizer(model)
+        self.optimizer = self._build_optimizer()
         self.device = model.head.weight.device
         options = {**CLINICAL_REGRESSION_DEFAULTS, **self.config.settings.get("clinical_regression", {})}
         self.precision = options["mixed_precision"]
@@ -89,6 +89,12 @@ class ClinicalTrainer:
             raise ValueError("BF16 autocast requires supported CUDA; choose none for CPU synthetic runs")
         self.epochs_completed = 0
         self.optimizer_steps = 0
+
+    def _build_optimizer(self):
+        return build_optimizer(self.model)
+
+    def _model_identifier(self):
+        return f"clinical_llm:{self.serializer.feature_set}"
 
     @staticmethod
     def _ids(ids, allow_empty=False):
@@ -110,7 +116,7 @@ class ClinicalTrainer:
         if ids is not None and (len(ids) != len(expected) or set(ids) != set(expected)):
             raise ValueError("Loader Dataset subjects do not match the explicit partition")
 
-    def _batch(self, batch, expected, seen):
+    def _batch_targets(self, batch, expected, seen):
         ids = self._ids(batch["subject_ids"])
         if not set(ids) <= set(expected) or seen & set(ids):
             raise ValueError("Duplicate subject or subject outside the explicit partition")
@@ -121,10 +127,14 @@ class ClinicalTrainer:
                 or not bool(torch.isfinite(labels).all()) or not bool(((labels >= 0) & (labels <= 30)).all())):
             raise ValueError("Batch requires one finite original-unit MoCA target per subject")
         seen.update(ids)
-        texts = self.serializer.serialize_batch(clinical)
+        return ids, labels.to(self.device, dtype=torch.float32)
+
+    def _batch(self, batch, expected, seen):
+        ids, labels = self._batch_targets(batch, expected, seen)
+        texts = self.serializer.serialize_batch(batch["clinical"])
         tokens = self.tokenizer(texts).to(self.device)
         # No EEG features/masks/artifact flags are read or passed to M1.
-        return ids, tokens, labels.to(self.device, dtype=torch.float32)
+        return ids, tokens, labels
 
     def _forward(self, tokens):
         return self.model(input_ids=tokens.input_ids, attention_mask=tokens.attention_mask,
@@ -197,7 +207,7 @@ class ClinicalTrainer:
                         predictions = self._forward(tokens)
                     for sid, subgroup, y, p in zip(ids, subgroups, targets.cpu().tolist(), predictions.cpu().tolist()):
                         rows.append({"seed": self.split.seed, "fold": self.split.fold, "subject": sid,
-                                     "subgroup": subgroup, "model": f"clinical_llm:{self.serializer.feature_set}",
+                                     "subgroup": subgroup, "model": self._model_identifier(),
                                      "y": y, "yhat": p, "target": y})
         finally:
             self.model.train(was_training)

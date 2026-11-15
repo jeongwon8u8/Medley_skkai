@@ -9,3 +9,21 @@
 ## Resolved
 
 - (없음)
+
+## Phase A3 — 2026-11-15
+
+User explicitly authorizes A3 integration, config, tests, commit and push.
+Requested shared changes: optional positive `fusion_b_training` group LR overrides
+(null inherits training.lr_new_modules), and ClinicalTrainer hooks for optimizer,
+subject/target validation and model identifier. M1 defaults and behavior remain
+unchanged; M1 never reads EEG. No split/data contract changes. Implemented within
+this authorized integration scope; no external owner identity is assumed.
+
+Review follow-up: normalize M3-only optional settings out of M1 checkpoint config
+digests so existing Task 6 inference checkpoints remain compatible. No M1 weight
+scope or export format change.
+
+Final artifact-path review adds medley_pd/.gitignore entries for outputs/ and
+checkpoints/: Task 6 private path policy names these application-relative
+directories, while prior root-only ignore entries did not cover their JSON
+metadata. No generated artifacts are added.
