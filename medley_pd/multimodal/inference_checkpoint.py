@@ -9,7 +9,7 @@ import subprocess
 from safetensors.torch import load_file, save_file
 import torch
 
-from .clinical_checkpoint import _config_digest, _private_path
+from .clinical_checkpoint import _config_digest, _digest, _private_path
 
 
 def save_checkpoint(model, path, *, parameter_selector, identity_builder, label,
@@ -47,7 +47,11 @@ def load_checkpoint(model, path, *, parameter_selector, identity_builder, label)
         git_revision = metadata["git_revision"]
         if git_revision is not None and (not isinstance(git_revision, str) or not git_revision.strip()):
             raise ValueError(f"Invalid {label} Git provenance metadata")
-        if (metadata["identity"] != identity or _config_digest(config) != identity["config_digest"]
+        saved_identity = dict(metadata["identity"])
+        if saved_identity["config_digest"] not in (_digest(config), _config_digest(config)):
+            raise ValueError(f"Incompatible or corrupted {label} inference checkpoint metadata")
+        saved_identity["config_digest"] = _config_digest(config)
+        if (saved_identity != identity or _config_digest(config) != identity["config_digest"]
                 or hashlib.sha256((path / "trainable.safetensors").read_bytes()).hexdigest() != metadata["weights_sha256"]
                 or any(type(metadata[key]) is not int or metadata[key] < 0 for key in ("epochs_completed", "optimizer_steps"))):
             raise ValueError(f"Incompatible or corrupted {label} inference checkpoint metadata")

@@ -36,3 +36,11 @@ selection into a reusable helper; trainer device/input and optimizer hooks; reus
 A3 safe checkpoint machinery with role-specific scopes. Preserve old M1/M3
 checkpoint identity by excluding A-only settings for those architectures. No
 preprocessing, cache, cohort or fixed-split changes. Owner identities remain TBD.
+
+## Phase C1 — 2026-11-15
+
+User authorizes shared experiment protocol/config/provenance integration and
+commit/push. Add optional protocol policies, reuse existing split_root, seed/fold
+selection and training.validation_fraction. Exclude protocol-only settings from
+inference checkpoint identity to preserve previous M1/M2/M3 files. No outer CSV,
+preprocessing, features, model behavior, baseline output or earlier test changes.

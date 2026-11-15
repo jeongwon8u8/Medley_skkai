@@ -49,6 +49,11 @@ FUSION_A_DEFAULTS = {
     "lr_pooling": None, "lr_eeg_projection": None, "lr_clinical_projection": None,
     "lr_fusion": None, "lr_feature_adapter": None,
 }
+PROTOCOL_DEFAULTS = {
+    "inner_policy": "sha256_rank_v1", "cohort_policy": "exact_source",
+    "strict_comparability": True, "manifest_dir": "outputs/multimodal_runs",
+    "target_atol": 1e-5,
+}
 # Field names are a schema, not a second set of experiment/preprocessing values.
 _SCHEMA: JsonDict = {
     **dict.fromkeys(("schema_version", "architecture", "experiment_name", "dataset", "task", "clinical_set")),
@@ -73,6 +78,7 @@ _SCHEMA["clinical_text"] = dict.fromkeys(CLINICAL_TEXT_DEFAULTS)
 _SCHEMA["clinical_regression"] = dict.fromkeys(CLINICAL_REGRESSION_DEFAULTS)
 _SCHEMA["fusion_b_training"] = dict.fromkeys(FUSION_B_TRAINING_DEFAULTS)
 _SCHEMA["fusion_a"] = dict.fromkeys(FUSION_A_DEFAULTS)
+_SCHEMA["protocol"] = dict.fromkeys(PROTOCOL_DEFAULTS)
 
 
 def _with_optional_defaults(settings: Any) -> Any:
@@ -96,6 +102,10 @@ def _with_optional_defaults(settings: Any) -> Any:
             result["fusion_a"] = copy.deepcopy(FUSION_A_DEFAULTS)
         elif isinstance(result["fusion_a"], dict):
             result["fusion_a"] = {**FUSION_A_DEFAULTS, **result["fusion_a"]}
+        if "protocol" not in result:
+            result["protocol"] = copy.deepcopy(PROTOCOL_DEFAULTS)
+        elif isinstance(result["protocol"], dict):
+            result["protocol"] = {**PROTOCOL_DEFAULTS, **result["protocol"]}
         # A1 optional fields preserve earlier JSON and resolved snapshots.
         if isinstance(result.get("eeg"), dict):
             result["eeg"].setdefault("seed", 0)
@@ -232,6 +242,13 @@ def validate_config(settings: JsonDict) -> None:
     for key in FUSION_A_DEFAULTS:
         if key.startswith("lr_") and settings["fusion_a"][key] is not None:
             _number(settings, f"fusion_a.{key}")
+    _choice(settings, "protocol.inner_policy", ("sha256_rank_v1",))
+    _choice(settings, "protocol.cohort_policy", ("exact_source",))
+    _choice(settings, "protocol.strict_comparability", (True, False))
+    _number(settings, "protocol.target_atol", strict=False, maximum=.001)
+    directory = settings["protocol"]["manifest_dir"]
+    if not isinstance(directory, str) or not directory.strip():
+        raise ConfigError("protocol.manifest_dir must be a nonempty private output path")
     name = settings["experiment_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
         raise ConfigError("experiment_name must be 1–128 ASCII letters/digits/underscores/hyphens, starting with a letter or digit")

@@ -70,7 +70,7 @@ def _digest(value) -> str:
 def _config_digest(config):
     # Architecture-specific optional defaults must not invalidate older M1/M3 files.
     settings = config["settings"]
-    excluded = set()
+    excluded = {"protocol"}
     if settings["architecture"] != "fusion_a":
         excluded.add("fusion_a")
     if settings["architecture"] == "clinical_only":
