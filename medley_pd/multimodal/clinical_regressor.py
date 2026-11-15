@@ -10,6 +10,21 @@ from torch.nn import functional as F
 from .llm_backbone import LLMBackbone, select_prediction_state, parameter_statistics
 
 
+def clinical_prediction_state(backbone: LLMBackbone, *, input_ids: torch.Tensor,
+                              attention_mask: torch.Tensor,
+                              prediction_positions: torch.Tensor) -> torch.Tensor:
+    """Task 6 text-only suffix representation [B,H], preserving autograd."""
+    hidden = backbone.forward_hidden(input_ids=input_ids, attention_mask=attention_mask)
+    selected = select_prediction_state(hidden, attention_mask, prediction_positions)
+    # M1's tokenization policy has no trailing EOS: prediction is the last
+    # real token. Explicit selection must never choose a clinical/pad token.
+    last = torch.arange(input_ids.shape[1], device=input_ids.device).expand_as(input_ids)
+    last = last.masked_fill(~attention_mask.bool(), -1).max(dim=1).values
+    if not torch.equal(prediction_positions, last):
+        raise ValueError("Clinical prediction position must be the final actual suffix token")
+    return selected
+
+
 class ClinicalLLMRegressor(nn.Module):
     """[B,L] IDs/mask + explicit [B] suffix positions -> raw float32 [B]."""
 
@@ -29,14 +44,9 @@ class ClinicalLLMRegressor(nn.Module):
 
     def forward(self, *, input_ids: torch.Tensor, attention_mask: torch.Tensor,
                 prediction_positions: torch.Tensor) -> torch.Tensor:
-        hidden = self.backbone.forward_hidden(input_ids=input_ids, attention_mask=attention_mask)
-        selected = select_prediction_state(hidden, attention_mask, prediction_positions)
-        # M1's tokenization policy has no trailing EOS: prediction is the last
-        # real token. Explicit selection must never choose a clinical/pad token.
-        last = torch.arange(input_ids.shape[1], device=input_ids.device).expand_as(input_ids)
-        last = last.masked_fill(~attention_mask.bool(), -1).max(dim=1).values
-        if not torch.equal(prediction_positions, last):
-            raise ValueError("M1 prediction position must be the final actual suffix token")
+        selected = clinical_prediction_state(self.backbone, input_ids=input_ids,
+                                             attention_mask=attention_mask,
+                                             prediction_positions=prediction_positions)
         predictions = self.head(selected.to(self.head.weight.dtype)).squeeze(-1).float()
         if not bool(torch.isfinite(predictions).all()):
             raise ValueError("Nonfinite clinical predictions")

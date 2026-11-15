@@ -82,13 +82,16 @@ class ClinicalTrainer:
         self.serializer = ClinicalTextSerializer(self.config)
         self.tokenizer = ClinicalTokenizer(model.backbone)
         self.optimizer = self._build_optimizer()
-        self.device = model.head.weight.device
+        self.device = self._model_device()
         options = {**CLINICAL_REGRESSION_DEFAULTS, **self.config.settings.get("clinical_regression", {})}
         self.precision = options["mixed_precision"]
         if self.precision == "bfloat16" and (self.device.type != "cuda" or not torch.cuda.is_bf16_supported()):
             raise ValueError("BF16 autocast requires supported CUDA; choose none for CPU synthetic runs")
         self.epochs_completed = 0
         self.optimizer_steps = 0
+
+    def _model_device(self):
+        return self.model.head.weight.device
 
     def _build_optimizer(self):
         return build_optimizer(self.model)

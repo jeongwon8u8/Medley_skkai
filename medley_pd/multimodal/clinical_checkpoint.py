@@ -68,11 +68,14 @@ def _digest(value) -> str:
 
 
 def _config_digest(config):
-    # M3-only optional settings must not invalidate pre-A3 M1 checkpoints.
-    if config["settings"]["architecture"] == "clinical_only":
-        config = {**config, "settings": {k: v for k, v in config["settings"].items()
-                                        if k != "fusion_b_training"}}
-    return _digest(config)
+    # Architecture-specific optional defaults must not invalidate older M1/M3 files.
+    settings = config["settings"]
+    excluded = set()
+    if settings["architecture"] != "fusion_a":
+        excluded.add("fusion_a")
+    if settings["architecture"] == "clinical_only":
+        excluded.add("fusion_b_training")
+    return _digest({**config, "settings": {k: v for k, v in settings.items() if k not in excluded}})
 
 
 def _identity(model):
@@ -136,7 +139,11 @@ def load_inference_checkpoint(model: ClinicalLLMRegressor, path) -> dict:
         metadata = json.loads((path / "manifest.json").read_text(encoding="utf-8"))
         saved_config = json.loads((path / "resolved_config.json").read_text(encoding="utf-8"))
         identity = _identity(model)
-        if (metadata["identity"] != identity or _config_digest(saved_config) != identity["config_digest"]
+        saved_identity = dict(metadata["identity"])
+        if saved_identity["config_digest"] not in (_digest(saved_config), _config_digest(saved_config)):
+            raise ValueError("Incompatible or corrupted M1 inference checkpoint metadata")
+        saved_identity["config_digest"] = _config_digest(saved_config)
+        if (saved_identity != identity or _config_digest(saved_config) != identity["config_digest"]
                 or hashlib.sha256((path / "trainable.safetensors").read_bytes()).hexdigest() != metadata["weights_sha256"]):
             raise ValueError("Incompatible or corrupted M1 inference checkpoint metadata")
         tensors = load_file(str(path / "trainable.safetensors"), device="cpu")

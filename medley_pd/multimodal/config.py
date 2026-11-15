@@ -43,6 +43,12 @@ CLINICAL_REGRESSION_DEFAULTS = {
 }
 # Null group overrides inherit the existing new-module rate.
 FUSION_B_TRAINING_DEFAULTS = dict.fromkeys(("lr_pooling", "lr_projector", "lr_head", "lr_feature_adapter"))
+FUSION_A_DEFAULTS = {
+    "query_aggregation": "mean", "eeg_projection_dim": 256, "clinical_projection_dim": 256,
+    "layers": 2, "layer_norm": True, "activation": "gelu",
+    "lr_pooling": None, "lr_eeg_projection": None, "lr_clinical_projection": None,
+    "lr_fusion": None, "lr_feature_adapter": None,
+}
 # Field names are a schema, not a second set of experiment/preprocessing values.
 _SCHEMA: JsonDict = {
     **dict.fromkeys(("schema_version", "architecture", "experiment_name", "dataset", "task", "clinical_set")),
@@ -66,6 +72,7 @@ _SCHEMA["llm"].update(dict.fromkeys(LLM_RUNTIME_DEFAULTS))
 _SCHEMA["clinical_text"] = dict.fromkeys(CLINICAL_TEXT_DEFAULTS)
 _SCHEMA["clinical_regression"] = dict.fromkeys(CLINICAL_REGRESSION_DEFAULTS)
 _SCHEMA["fusion_b_training"] = dict.fromkeys(FUSION_B_TRAINING_DEFAULTS)
+_SCHEMA["fusion_a"] = dict.fromkeys(FUSION_A_DEFAULTS)
 
 
 def _with_optional_defaults(settings: Any) -> Any:
@@ -85,6 +92,10 @@ def _with_optional_defaults(settings: Any) -> Any:
             result["fusion_b_training"] = copy.deepcopy(FUSION_B_TRAINING_DEFAULTS)
         elif isinstance(result["fusion_b_training"], dict):
             result["fusion_b_training"] = {**FUSION_B_TRAINING_DEFAULTS, **result["fusion_b_training"]}
+        if "fusion_a" not in result:
+            result["fusion_a"] = copy.deepcopy(FUSION_A_DEFAULTS)
+        elif isinstance(result["fusion_a"], dict):
+            result["fusion_a"] = {**FUSION_A_DEFAULTS, **result["fusion_a"]}
         # A1 optional fields preserve earlier JSON and resolved snapshots.
         if isinstance(result.get("eeg"), dict):
             result["eeg"].setdefault("seed", 0)
@@ -214,6 +225,13 @@ def validate_config(settings: JsonDict) -> None:
     for key in FUSION_B_TRAINING_DEFAULTS:
         if settings["fusion_b_training"][key] is not None:
             _number(settings, f"fusion_b_training.{key}")
+    for key in ("query_aggregation", "layers", "layer_norm", "activation"):
+        _choice(settings, f"fusion_a.{key}", (FUSION_A_DEFAULTS[key],))
+    for key in ("eeg_projection_dim", "clinical_projection_dim"):
+        _number(settings, f"fusion_a.{key}", integer=True)
+    for key in FUSION_A_DEFAULTS:
+        if key.startswith("lr_") and settings["fusion_a"][key] is not None:
+            _number(settings, f"fusion_a.{key}")
     name = settings["experiment_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
         raise ConfigError("experiment_name must be 1–128 ASCII letters/digits/underscores/hyphens, starting with a letter or digit")

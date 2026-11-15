@@ -27,3 +27,12 @@ Final artifact-path review adds medley_pd/.gitignore entries for outputs/ and
 checkpoints/: Task 6 private path policy names these application-relative
 directories, while prior root-only ignore entries did not cover their JSON
 metadata. No generated artifacts are added.
+
+## Phase B — 2026-11-15
+
+User explicitly authorizes sequential B1–B4 implementation and shared integration.
+Requested: optional fusion_a configuration fields; factor M1 suffix hidden-state
+selection into a reusable helper; trainer device/input and optimizer hooks; reuse
+A3 safe checkpoint machinery with role-specific scopes. Preserve old M1/M3
+checkpoint identity by excluding A-only settings for those architectures. No
+preprocessing, cache, cohort or fixed-split changes. Owner identities remain TBD.
