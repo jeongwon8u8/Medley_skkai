@@ -16,6 +16,7 @@ import torch
 
 from .clinical_regressor import ClinicalLLMRegressor
 from .clinical_trainer import ClinicalEvaluation
+from .config import inference_config_digest as _config_digest
 
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -65,17 +66,6 @@ def _checkpoint_parameters(model):
 
 def _digest(value) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-
-
-def _config_digest(config):
-    # Architecture-specific optional defaults must not invalidate older M1/M3 files.
-    settings = config["settings"]
-    excluded = {"protocol", "runner"}
-    if settings["architecture"] != "fusion_a":
-        excluded.add("fusion_a")
-    if settings["architecture"] == "clinical_only":
-        excluded.add("fusion_b_training")
-    return _digest({**config, "settings": {k: v for k, v in settings.items() if k not in excluded}})
 
 
 def _identity(model):

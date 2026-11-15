@@ -74,8 +74,12 @@ def _attempt_hashes(root, attempt):
             for path in sorted(attempt.rglob("*")) if path.is_file()}
 
 
-def validate_completion(root, completion, *, expected_identity=None):
-    """Validate durable artifacts without loading a pretrained model."""
+def validate_completion(root, completion, *, expected_identity=None, verify_tensors=True):
+    """Validate durable artifacts; C3 may explicitly verify tensor bytes by hash only.
+
+    Default still loads/checks finite trainable tensors for C2; verify_tensors=False
+    retains all completion/selection/config/checksum checks without tensor/model IO.
+    """
     root = Path(root).resolve()
     try:
         identity = completion["execution_identity"]
@@ -149,7 +153,7 @@ def validate_completion(root, completion, *, expected_identity=None):
             checkpoint = _artifact(root, str(Path(attempt_name) / selection["checkpoint"] / "manifest.json")).parent
             runtime = read_json(attempt / "runtime_config.json")
             cp = read_json(checkpoint / "manifest.json")
-            from .clinical_checkpoint import _config_digest
+            from .config import inference_config_digest as _config_digest
             expected_format = {"M1": "medley_m1_inference_v1", "M2": "medley_m2_inference_v1", "M3": "medley_m3_inference_v1"}[info["model"]]
             if (type(cp["epochs_completed"]) is not int or type(cp["optimizer_steps"]) is not int
                     or selection["execution_id"] != completion["execution_id"]
@@ -196,11 +200,12 @@ def validate_completion(root, completion, *, expected_identity=None):
             if (not stop and len(history) != maximum or stopping.best_epoch != selection["best_epoch"]
                     or stopping.best != selection["validation_MAE"] or cp["optimizer_steps"] != steps * stopping.best_epoch):
                 raise ValueError()
-            from safetensors.torch import load_file
-            import torch
-            tensors = load_file(str(checkpoint / "trainable.safetensors"), device="cpu")
-            if not tensors or any(not bool(torch.isfinite(t).all()) for t in tensors.values()):
-                raise ValueError()
+            if verify_tensors:
+                from safetensors.torch import load_file
+                import torch
+                tensors = load_file(str(checkpoint / "trainable.safetensors"), device="cpu")
+                if not tensors or any(not bool(torch.isfinite(t).all()) for t in tensors.values()):
+                    raise ValueError()
     except (KeyError, TypeError, ValueError, OSError, IndexError, AttributeError):
         raise RunnerError("completion_invalid", "Completed-run identity or required artifacts failed integrity validation") from None
     return completion

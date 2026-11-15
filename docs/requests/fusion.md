@@ -52,3 +52,12 @@ commit/push. Add only missing runner selection/dataloader/M0-reference settings;
 reuse existing training defaults and C1 manifests. Exclude orchestration-only
 runner settings from inference checkpoint digests to preserve old checkpoints.
 No changes to model definitions, optimizer groups, outer splits or baseline files.
+
+## Phase C3 — 2026-11-15
+
+User authorizes read-only matched evaluation/statistics/reporting and commit/push.
+Add minimal Task 1 analysis options; extract inference config digest into the
+torch-free config module preserving the clinical checkpoint helper name; C2
+completion validation keeps its full default while exposing explicit byte-hash
+verification for prediction-only C3 (no tensor/model loading). No source artifacts,
+metrics, prior tests, model/trainer behavior or fixed assignments are changed.

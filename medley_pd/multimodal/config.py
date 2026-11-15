@@ -10,6 +10,7 @@ import argparse
 import copy
 import csv
 import json
+import hashlib
 import math
 import os
 from dataclasses import dataclass
@@ -58,6 +59,12 @@ RUNNER_DEFAULTS = {
     "selection_metric": "MAE", "min_delta": 0.0, "shuffle_train": True,
     "num_workers": 0, "baseline_path": None, "baseline_model": None,
 }
+ANALYSIS_DEFAULTS = {
+    "matching": "strict", "aggregation": "pooled_rows", "bootstrap_unit": "subject_cluster",
+    "bootstrap_replicates": 2000, "bootstrap_seed": 42, "confidence": .95, "min_subjects": 5,
+    "pairs": None, "allowed_differences": [], "subgroups": False, "synthetic": False,
+    "output_format": "csv_json_markdown",
+}
 # Field names are a schema, not a second set of experiment/preprocessing values.
 _SCHEMA: JsonDict = {
     **dict.fromkeys(("schema_version", "architecture", "experiment_name", "dataset", "task", "clinical_set")),
@@ -84,6 +91,7 @@ _SCHEMA["fusion_b_training"] = dict.fromkeys(FUSION_B_TRAINING_DEFAULTS)
 _SCHEMA["fusion_a"] = dict.fromkeys(FUSION_A_DEFAULTS)
 _SCHEMA["protocol"] = dict.fromkeys(PROTOCOL_DEFAULTS)
 _SCHEMA["runner"] = dict.fromkeys(RUNNER_DEFAULTS)
+_SCHEMA["analysis"] = dict.fromkeys(ANALYSIS_DEFAULTS)
 
 
 def _with_optional_defaults(settings: Any) -> Any:
@@ -115,6 +123,10 @@ def _with_optional_defaults(settings: Any) -> Any:
             result["runner"] = copy.deepcopy(RUNNER_DEFAULTS)
         elif isinstance(result["runner"], dict):
             result["runner"] = {**RUNNER_DEFAULTS, **result["runner"]}
+        if "analysis" not in result:
+            result["analysis"] = copy.deepcopy(ANALYSIS_DEFAULTS)
+        elif isinstance(result["analysis"], dict):
+            result["analysis"] = {**copy.deepcopy(ANALYSIS_DEFAULTS), **result["analysis"]}
         # A1 optional fields preserve earlier JSON and resolved snapshots.
         if isinstance(result.get("eeg"), dict):
             result["eeg"].setdefault("seed", 0)
@@ -266,6 +278,28 @@ def validate_config(settings: JsonDict) -> None:
         value = settings["runner"][key]
         if value is not None and (not isinstance(value, str) or not value.strip()):
             raise ConfigError(f"runner.{key} must be null or a nonempty string")
+    for path, choices in {
+        "analysis.matching": ("strict", "matched_subset"), "analysis.aggregation": ("pooled_rows", "mean_runs"),
+        "analysis.bootstrap_unit": ("subject_cluster",), "analysis.output_format": ("csv_json_markdown", "json"),
+        "analysis.subgroups": (True, False), "analysis.synthetic": (True, False),
+    }.items():
+        _choice(settings, path, choices)
+    _number(settings, "analysis.bootstrap_replicates", integer=True, minimum=2, strict=False)
+    _number(settings, "analysis.bootstrap_seed", integer=True, strict=False, maximum=2**32)
+    _number(settings, "analysis.confidence", maximum=1)
+    _number(settings, "analysis.min_subjects", integer=True, minimum=2, strict=False)
+    analysis = settings["analysis"]
+    pairs = analysis["pairs"]
+    if pairs is not None and (not isinstance(pairs, list) or not pairs or any(
+        not isinstance(pair, list) or len(pair) != 2 or any(not isinstance(v, str) or not v.strip() for v in pair)
+        or pair[0] == pair[1] for pair in pairs) or len({tuple(p) for p in pairs}) != len(pairs)):
+        raise ConfigError("analysis.pairs requires distinct [candidate,reference] string pairs or null")
+    allowed = analysis["allowed_differences"]
+    prefixes = ("settings.eeg.", "settings.llm.", "settings.training.", "settings.clinical_text.",
+                "settings.clinical_regression.", "settings.runner.")
+    if (not isinstance(allowed, list) or any(not isinstance(p, str) or not (p == "settings.clinical_set" or p.startswith(prefixes)) for p in allowed)
+            or len(set(allowed)) != len(allowed)):
+        raise ConfigError("analysis.allowed_differences requires explicit research-setting paths; cohort/target overrides are forbidden")
     name = settings["experiment_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
         raise ConfigError("experiment_name must be 1–128 ASCII letters/digits/underscores/hyphens, starting with a letter or digit")
@@ -507,6 +541,18 @@ def load_multimodal_config(path: str | Path, overrides: Iterable[str] = ()) -> R
     _validate_medley(settings, medley)
     status = validate_split_selection(settings, medley)
     return ResolvedConfig(copy.deepcopy(settings), copy.deepcopy(medley), status)
+
+
+def inference_config_digest(config):
+    """Architecture-aware inference identity; analysis/orchestration defaults are irrelevant."""
+    settings = config["settings"]
+    excluded = {"protocol", "runner", "analysis"}
+    if settings["architecture"] != "fusion_a":
+        excluded.add("fusion_a")
+    if settings["architecture"] == "clinical_only":
+        excluded.add("fusion_b_training")
+    payload = {**config, "settings": {k: v for k, v in settings.items() if k not in excluded}}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
 def require_model_id(config: ResolvedConfig) -> str:
