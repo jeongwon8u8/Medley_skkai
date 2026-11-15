@@ -29,6 +29,13 @@ LLM_RUNTIME_DEFAULTS = {
     "remote_code_reason": None, "target_modules": None, "max_sequence_tokens": 512,
     "padding_side": None, "pad_token_policy": "require", "device": "auto",
 }
+# Versioned Task 5 defaults also apply to pre-Task-5 JSON and snapshots.
+CLINICAL_TEXT_DEFAULTS = {
+    "template_version": "medley_neutral_v1",
+    "numeric_significant_digits": 15,
+    "extra_approved_policy": "reject",
+    "sex_code_mapping": None,
+}
 # Field names are a schema, not a second set of experiment/preprocessing values.
 _SCHEMA: JsonDict = {
     **dict.fromkeys(("schema_version", "architecture", "experiment_name", "dataset", "task", "clinical_set")),
@@ -49,12 +56,18 @@ _SCHEMA: JsonDict = {
     "evaluation": dict.fromkeys(("use_existing_splits", "seeds", "n_folds", "folds", "save_per_case")),
 }
 _SCHEMA["llm"].update(dict.fromkeys(LLM_RUNTIME_DEFAULTS))
+_SCHEMA["clinical_text"] = dict.fromkeys(CLINICAL_TEXT_DEFAULTS)
 
 
-def _with_llm_defaults(settings: Any) -> Any:
+def _with_optional_defaults(settings: Any) -> Any:
     result = copy.deepcopy(settings)
     if isinstance(result, dict) and isinstance(result.get("llm"), dict):
         result["llm"] = {**copy.deepcopy(LLM_RUNTIME_DEFAULTS), **result["llm"]}
+    if isinstance(result, dict):
+        if "clinical_text" not in result:
+            result["clinical_text"] = copy.deepcopy(CLINICAL_TEXT_DEFAULTS)
+        elif isinstance(result["clinical_text"], dict):
+            result["clinical_text"] = {**copy.deepcopy(CLINICAL_TEXT_DEFAULTS), **result["clinical_text"]}
     return result
 
 
@@ -145,7 +158,7 @@ def _choice(config: JsonDict, path: str, choices: Iterable[Any]) -> None:
 
 def validate_config(settings: JsonDict) -> None:
     """Validate a complete settings mapping without accessing models/data/GPU."""
-    settings = _with_llm_defaults(settings)
+    settings = _with_optional_defaults(settings)
     _shape(settings, _SCHEMA)
     for path, choices in {
         "schema_version": (1,), "architecture": ("clinical_only", "fusion_a", "fusion_b"),
@@ -162,6 +175,16 @@ def validate_config(settings: JsonDict) -> None:
         "training.optimizer": ("adamw",), "evaluation.use_existing_splits": (True,),
     }.items():
         _choice(settings, path, choices)
+    _choice(settings, "clinical_text.template_version", ("medley_neutral_v1",))
+    _choice(settings, "clinical_text.extra_approved_policy", ("reject", "ignore"))
+    _number(settings, "clinical_text.numeric_significant_digits", integer=True, maximum=35)
+    mapping = settings["clinical_text"]["sex_code_mapping"]
+    if mapping is not None and (
+        not isinstance(mapping, dict) or not mapping
+        or any(not isinstance(k, str) or re.fullmatch(r"0|-?[1-9][0-9]*", k) is None
+               or not isinstance(v, str) or v not in ("female", "male") for k, v in mapping.items())
+    ):
+        raise ConfigError("clinical_text.sex_code_mapping must be null or verified integer-code strings mapped to female/male")
     name = settings["experiment_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
         raise ConfigError("experiment_name must be 1–128 ASCII letters/digits/underscores/hyphens, starting with a letter or digit")
@@ -370,7 +393,7 @@ class ResolvedConfig:
 
     def to_dict(self) -> JsonDict:
         """Return a standalone snapshot, independent of inheritance source paths."""
-        return copy.deepcopy({"settings": _with_llm_defaults(self.settings), "medley": self.medley})
+        return copy.deepcopy({"settings": _with_optional_defaults(self.settings), "medley": self.medley})
 
 
 def load_multimodal_config(path: str | Path, overrides: Iterable[str] = ()) -> ResolvedConfig:
@@ -383,7 +406,7 @@ def load_multimodal_config(path: str | Path, overrides: Iterable[str] = ()) -> R
         settings = document["settings"]
     else:
         settings = document
-    settings = _with_llm_defaults(settings)
+    settings = _with_optional_defaults(settings)
     # Validate shape before override traversal, so invalid containers fail clearly.
     _shape(settings, _SCHEMA)
     settings = apply_overrides(settings, overrides)
