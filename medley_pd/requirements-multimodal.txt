@@ -1,0 +1,6 @@
+# Task 4 CPU Frozen/LoRA stack verified with existing torch 2.8.0+cu128.
+# Keep torch/CUDA supplied by the template; inspect pip's plan before installing.
+transformers==5.23.0
+peft==0.21.3
+accelerate==1.15.0
+safetensors==0.8.0

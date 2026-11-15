@@ -1,0 +1,4 @@
+# Optional NF4 runtime, NOT installed or GPU-validated by Task 4.
+# Resolve against an explicit constraint preserving the existing torch build.
+-r requirements-multimodal.txt
+bitsandbytes

@@ -23,6 +23,12 @@ from medley.config import load_config as load_medley_config
 
 JsonDict = dict[str, Any]
 CONFIG_DIR = Path(__file__).resolve().parents[1] / "configs" / "multimodal"
+# Optional Task 4 fields are filled when reading older configs/snapshots.
+LLM_RUNTIME_DEFAULTS = {
+    "cache_dir": None, "local_files_only": True, "trust_remote_code": False,
+    "remote_code_reason": None, "target_modules": None, "max_sequence_tokens": 512,
+    "padding_side": None, "pad_token_policy": "require", "device": "auto",
+}
 # Field names are a schema, not a second set of experiment/preprocessing values.
 _SCHEMA: JsonDict = {
     **dict.fromkeys(("schema_version", "architecture", "experiment_name", "dataset", "task", "clinical_set")),
@@ -42,6 +48,14 @@ _SCHEMA: JsonDict = {
                                "validation_fraction", "optimizer", "gradient_clip_norm")),
     "evaluation": dict.fromkeys(("use_existing_splits", "seeds", "n_folds", "folds", "save_per_case")),
 }
+_SCHEMA["llm"].update(dict.fromkeys(LLM_RUNTIME_DEFAULTS))
+
+
+def _with_llm_defaults(settings: Any) -> Any:
+    result = copy.deepcopy(settings)
+    if isinstance(result, dict) and isinstance(result.get("llm"), dict):
+        result["llm"] = {**copy.deepcopy(LLM_RUNTIME_DEFAULTS), **result["llm"]}
+    return result
 
 
 class ConfigError(ValueError):
@@ -131,6 +145,7 @@ def _choice(config: JsonDict, path: str, choices: Iterable[Any]) -> None:
 
 def validate_config(settings: JsonDict) -> None:
     """Validate a complete settings mapping without accessing models/data/GPU."""
+    settings = _with_llm_defaults(settings)
     _shape(settings, _SCHEMA)
     for path, choices in {
         "schema_version": (1,), "architecture": ("clinical_only", "fusion_a", "fusion_b"),
@@ -196,6 +211,27 @@ def validate_config(settings: JsonDict) -> None:
     if max(settings["evaluation"]["folds"]) > settings["evaluation"]["n_folds"]:
         raise ConfigError("evaluation.folds exceeds evaluation.n_folds")
     _no_credentials(settings)
+    llm = settings["llm"]
+    for key in ("local_files_only", "trust_remote_code"):
+        if type(llm[key]) is not bool:
+            raise ConfigError(f"llm.{key} must be a boolean")
+    for key in ("cache_dir", "remote_code_reason"):
+        if llm[key] is not None and (not isinstance(llm[key], str) or not llm[key].strip()):
+            raise ConfigError(f"llm.{key} must be null or a nonempty string")
+    if llm["trust_remote_code"] and (not llm["remote_code_reason"] or not llm["revision"]):
+        raise ConfigError("trust_remote_code requires remote_code_reason and an explicit revision")
+    _choice(settings, "llm.padding_side", (None, "left", "right"))
+    _choice(settings, "llm.pad_token_policy", ("require", "eos"))
+    _number(settings, "llm.max_sequence_tokens", integer=True)
+    if llm["max_sequence_tokens"] < llm["max_text_tokens"]:
+        raise ConfigError("llm.max_sequence_tokens must cover max_text_tokens")
+    if not isinstance(llm["device"], str) or not re.fullmatch(r"auto|cpu|cuda(?::[0-9]+)?", llm["device"]):
+        raise ConfigError("llm.device must be auto, cpu or cuda[:index]")
+    targets = llm["target_modules"]
+    if targets is not None and (not isinstance(targets, list) or not targets
+                               or any(not isinstance(x, str) or not x.strip() for x in targets)
+                               or len(set(targets)) != len(targets)):
+        raise ConfigError("llm.target_modules must be null or distinct nonempty module names")
 
 
 def apply_overrides(settings: JsonDict, overrides: Iterable[str]) -> JsonDict:
@@ -334,7 +370,7 @@ class ResolvedConfig:
 
     def to_dict(self) -> JsonDict:
         """Return a standalone snapshot, independent of inheritance source paths."""
-        return copy.deepcopy({"settings": self.settings, "medley": self.medley})
+        return copy.deepcopy({"settings": _with_llm_defaults(self.settings), "medley": self.medley})
 
 
 def load_multimodal_config(path: str | Path, overrides: Iterable[str] = ()) -> ResolvedConfig:
@@ -347,6 +383,7 @@ def load_multimodal_config(path: str | Path, overrides: Iterable[str] = ()) -> R
         settings = document["settings"]
     else:
         settings = document
+    settings = _with_llm_defaults(settings)
     # Validate shape before override traversal, so invalid containers fail clearly.
     _shape(settings, _SCHEMA)
     settings = apply_overrides(settings, overrides)
