@@ -1,0 +1,12 @@
+einops
+huggingface_hub
+mne
+numpy
+openneuro-py
+pandas
+pyyaml
+safetensors
+scikit-learn>=1.2
+scipy
+timm
+torch

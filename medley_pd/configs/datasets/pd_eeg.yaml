@@ -1,0 +1,33 @@
+# PD-EEG (Tel Aviv Sourasky) — 기존 노트북과 같은 데이터·같은 파일 규칙
+name: pd_eeg
+dir: ds007526                  # data_root 아래 폴더 이름
+openneuro: {id: ds007526, tag: 1.0.2}
+download_include: ["participants.tsv", "participants.json", "dataset_description.json", "*task-rest*"]
+participants: participants.tsv
+
+file_pattern: "{sid}_*task-rest*_eeg.*"   # 대소문자 무시, derivatives 폴더는 후순위
+file_ext: [set, edf, bdf, vhdr, fif]
+condition: EO                  # 앉아서 눈 뜸 약 4분. 보행 기록은 사용하지 않음
+line_freq: 50                  # 이스라엘
+ref_aliases: [VREF, REF, E65, CZ_REF]   # HydroCel 기준전극(VREF) = Cz 위치 → 신호 0이라 보간됨
+reference: CZ                  # 기록 기준전극 (S-CEReBrO 전극 좌표용). 재참조하지 않음
+
+# 표준 이름: 원본 열 이름
+columns:
+  subject: participant_id
+  group: group
+  age: age
+  sex: sex
+  moca: moca
+  ctt: ctt
+  updrs_part_iii: updrs_part_iii
+  updrs_total: updrs_total
+  disease_duration: disease_duration
+  ledd: ledd
+  pigd_score: pigd_score
+  td_score: td_score
+  # education: ???            # 있으면 추가 (MoCA는 교육 수준 영향이 큼)
+
+patient_regex: "PD|PARK"       # group 값이 이 정규식에 맞으면 환자
+subgroup: {column: subject_id, regex: "^([A-Za-z]+)"}   # PD0001 → PD, PDM001 → PDM
+sex_map: null                  # null 이면 M/F, male/female 자동 변환 (M=1, F=0)

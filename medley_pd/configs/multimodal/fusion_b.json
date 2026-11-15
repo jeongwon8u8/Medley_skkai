@@ -1,0 +1,6 @@
+{
+  "extends": "base.json",
+  "architecture": "fusion_b",
+  "experiment_name": "pd_b_softtoken_v1",
+  "fusion": {"type": "soft_token"}
+}

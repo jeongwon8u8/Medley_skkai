@@ -1,0 +1,6 @@
+{
+  "extends": "base.json",
+  "architecture": "fusion_a",
+  "experiment_name": "pd_a_representation_v1",
+  "fusion": {"type": "representation"}
+}

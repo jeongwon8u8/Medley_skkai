@@ -1,0 +1,17 @@
+# 인지 저하 분류 — PD 환자 안에서 MoCA < 26 (인지 저하) vs ≥ 26
+# 기존 PD-EEG 과제 C 와 같은 기준. 지표: AUROC(주), 균형정확도·민감도·특이도(임계 0.5), Brier
+name: moca_impaired
+type: classification
+target: moca
+positive: {below: 26}          # moca < 26 → 1
+patients_only: true
+
+exclude: [moca, ctt, updrs_total]
+
+clinical_sets:
+  C0: [age, sex]
+  C1: [age, sex, updrs_part_iii, disease_duration, ledd]
+  C2: [age, sex, updrs_part_iii, disease_duration, ledd, pigd_score, td_score]
+
+cross_site_sets:
+  C0: [age, sex]

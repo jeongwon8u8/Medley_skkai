@@ -1,0 +1,19 @@
+{
+  "_설명": "train 결과(같은 experiment_name)를 인코더별로 평가하고, 인코더가 2개 이상이면 첫 인코더 기준으로 짝지어 비교. 순열 검정은 오래 걸리므로 필요할 때만 켬. task 는 학습 때와 같게 (moca | moca_impaired)",
+  "dataset": "pd_eeg",
+  "task": "moca",
+  "experiment_name": "main",
+  "max_segments": null,
+  "encoders": [
+    "cbramod",
+    "scerebro"
+  ],
+  "save_per_case": true,
+  "save_png": true,
+  "permtest": {
+    "label": false,
+    "eeg": false,
+    "n": 100,
+    "seeds": null
+  }
+}
