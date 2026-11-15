@@ -88,7 +88,16 @@ def _identity(model):
     tokenizer_identity = {"vocabulary": tokenizer.get_vocab(), "padding_side": tokenizer.padding_side,
                           "special_ids": [tokenizer.pad_token_id, tokenizer.bos_token_id, tokenizer.eos_token_id],
                           "backend": tokenizer.backend_tokenizer.to_str()}
-    return {"format": "medley_m1_inference_v1", "config_digest": _config_digest(config),
+    extra = {}
+    if config["settings"].get("ablation",{}).get("enabled",False) and synthetic_hash is not None:
+        canonical = hashlib.sha256()
+        for name,p in sorted(model.llm.named_parameters()):
+            if "lora_" in name: continue
+            name=name.removeprefix("base_model.model.").replace(".base_layer.",".")
+            canonical.update(name.encode())
+            canonical.update(p.detach().contiguous().cpu().view(torch.uint8).numpy().tobytes())
+        extra["canonical_synthetic_base_digest"] = canonical.hexdigest()
+    return {**extra,"format": "medley_m1_inference_v1", "config_digest": _config_digest(config),
             "base_config_digest": _digest(backbone.model.config.to_dict()),
             "tokenizer_digest": _digest(tokenizer_identity), "synthetic_frozen_digest": synthetic_hash,
             "model_id": llm["model_id"], "revision": llm["revision"], "mode": backbone.mode,
@@ -110,7 +119,8 @@ def save_inference_checkpoint(model: ClinicalLLMRegressor, path, *, epochs_compl
     (path / "resolved_config.json").write_text(json.dumps(config, sort_keys=True, indent=2), encoding="utf-8")
     weights_hash = hashlib.sha256((path / "trainable.safetensors").read_bytes()).hexdigest()
     metadata = {"identity": identity, "weights_sha256": weights_hash,
-                "epochs_completed": epochs_completed, "optimizer_steps": optimizer_steps}
+                "epochs_completed": epochs_completed, "optimizer_steps": optimizer_steps,
+                "trainable_parameters": sum(p.numel() for p in model.parameters() if p.requires_grad)}
     # Manifest written last: incomplete directories cannot be loaded.
     (path / "manifest.json").write_text(json.dumps(metadata, sort_keys=True, indent=2), encoding="utf-8")
     return path

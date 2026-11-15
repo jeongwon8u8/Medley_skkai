@@ -59,6 +59,7 @@ RUNNER_DEFAULTS = {
     "selection_metric": "MAE", "min_delta": 0.0, "shuffle_train": True,
     "num_workers": 0, "baseline_path": None, "baseline_model": None,
 }
+ABLATION_DEFAULTS = {"enabled": False, "numeric_projection_dim": 16, "numeric_scaling": "none"}
 ANALYSIS_DEFAULTS = {
     "matching": "strict", "aggregation": "pooled_rows", "bootstrap_unit": "subject_cluster",
     "bootstrap_replicates": 2000, "bootstrap_seed": 42, "confidence": .95, "min_subjects": 5,
@@ -92,6 +93,7 @@ _SCHEMA["fusion_a"] = dict.fromkeys(FUSION_A_DEFAULTS)
 _SCHEMA["protocol"] = dict.fromkeys(PROTOCOL_DEFAULTS)
 _SCHEMA["runner"] = dict.fromkeys(RUNNER_DEFAULTS)
 _SCHEMA["analysis"] = dict.fromkeys(ANALYSIS_DEFAULTS)
+_SCHEMA["ablation"] = dict.fromkeys(ABLATION_DEFAULTS)
 
 
 def _with_optional_defaults(settings: Any) -> Any:
@@ -123,6 +125,7 @@ def _with_optional_defaults(settings: Any) -> Any:
             result["runner"] = copy.deepcopy(RUNNER_DEFAULTS)
         elif isinstance(result["runner"], dict):
             result["runner"] = {**RUNNER_DEFAULTS, **result["runner"]}
+        result["ablation"] = {**ABLATION_DEFAULTS, **result.get("ablation", {})} if isinstance(result.get("ablation", {}), dict) else result["ablation"]
         if "analysis" not in result:
             result["analysis"] = copy.deepcopy(ANALYSIS_DEFAULTS)
         elif isinstance(result["analysis"], dict):
@@ -231,9 +234,9 @@ def validate_config(settings: JsonDict) -> None:
         "llm.quantization": ("none", "nf4"),
         "llm.compute_dtype": ("float32", "float16", "bfloat16"),
         "eeg.encoder": ("cbramod", "scerebro"), "eeg.input_type": ("cached_features",),
-        "eeg.pooling.type": ("attention",), "eeg.projector.type": ("linear",),
+        "eeg.pooling.type": ("attention", "mean", "max") if settings["ablation"]["enabled"] else ("attention",), "eeg.projector.type": ("linear",),
         "fusion.type": ("none", "representation", "soft_token"),
-        "fusion.token_position": ("prefix",), "fusion.numeric_skip": (False,),
+        "fusion.token_position": ("prefix",), "fusion.numeric_skip": (False, True) if settings["ablation"]["enabled"] else (False,),
         "fusion.uncertainty": (False,), "prediction.type": ("regression",),
         "loss.primary": ("huber",), "loss.auxiliary": (False,),
         "training.optimizer": ("adamw",), "evaluation.use_existing_splits": (True,),
@@ -300,6 +303,13 @@ def validate_config(settings: JsonDict) -> None:
     if (not isinstance(allowed, list) or any(not isinstance(p, str) or not (p == "settings.clinical_set" or p.startswith(prefixes)) for p in allowed)
             or len(set(allowed)) != len(allowed)):
         raise ConfigError("analysis.allowed_differences requires explicit research-setting paths; cohort/target overrides are forbidden")
+    _choice(settings, "ablation.enabled", (False, True))
+    _choice(settings, "ablation.numeric_scaling", ("none",))
+    _number(settings, "ablation.numeric_projection_dim", integer=True)
+    if settings["eeg"]["pooling"]["type"] != "attention" and settings["eeg"]["pooling"]["num_queries"] != 1:
+        raise ConfigError("Mean/max pooling requires num_queries=1; repeated vectors are not supported")
+    if settings["fusion"]["numeric_skip"] and settings["architecture"] != "fusion_a":
+        raise ConfigError("fusion.numeric_skip ON supports Architecture A/M2 only")
     name = settings["experiment_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
         raise ConfigError("experiment_name must be 1–128 ASCII letters/digits/underscores/hyphens, starting with a letter or digit")
@@ -547,6 +557,8 @@ def inference_config_digest(config):
     """Architecture-aware inference identity; analysis/orchestration defaults are irrelevant."""
     settings = config["settings"]
     excluded = {"protocol", "runner", "analysis"}
+    if not settings.get("ablation", {}).get("enabled", False):
+        excluded.add("ablation")
     if settings["architecture"] != "fusion_a":
         excluded.add("fusion_a")
     if settings["architecture"] == "clinical_only":

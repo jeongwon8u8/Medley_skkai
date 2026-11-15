@@ -8,7 +8,7 @@ def _parameters(model):
     if not isinstance(model,EEGClinicalRepresentationFusionRegressor):
         raise ValueError("M2 checkpoint requires Architecture A")
     return {name:p for name,p in model.named_parameters()
-            if name.startswith(("eeg_encoder.","clinical_encoder.projection.","head."))
+            if name.startswith(("eeg_encoder.","clinical_encoder.projection.","head.","numeric_branch."))
             or name.startswith("clinical_encoder.llm.") and "lora_" in name}
 
 

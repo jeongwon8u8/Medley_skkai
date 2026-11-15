@@ -100,11 +100,16 @@ def load_completed_run(path, *, label=None):
             or not (frame.fold == info["fold"]).all() or not (frame.model == completion["prediction_model"]).all()):
         raise AnalysisError("coverage", "Predictions do not exactly cover their completed source partition")
     checkpoint_identity = None
+    parameter_count = None
     if info["model"] != "M0":
         selection = read_json(attempt / "selection.json")
-        checkpoint_identity = read_json(attempt / selection["checkpoint"] / "manifest.json")["identity"]
+        checkpoint_metadata = read_json(attempt / selection["checkpoint"] / "manifest.json")
+        checkpoint_identity = checkpoint_metadata["identity"]
+        parameter_count = checkpoint_metadata.get("trainable_parameters")
+        if parameter_count is not None and (type(parameter_count) is not int or parameter_count < 0):
+            raise AnalysisError("parameter_count", "Invalid measured trainable parameter metadata")
     run = {"manifest": manifest, "completion": completion, "checkpoint_identity": checkpoint_identity,
-           "source_root": str(root), "c1_root": str(root.parent.parent)}
+           "source_root": str(root), "c1_root": str(root.parent.parent), "trainable_parameters": parameter_count}
     sources = {str(marker): before, str(manifest_path): file_hash(manifest_path)}
     sources.update({str(root / name): digest for name,digest in completion["artifacts"].items()})
     result = PredictionSeries(label,frame,{(info["seed"],info["fold"]):run},sources)

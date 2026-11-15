@@ -40,8 +40,8 @@ def seed_eeg_modules(config: ResolvedConfig) -> int:
 class EEGFeatureAdapter(nn.Identity):
     """OFF is exact identity, including tensor identity and gradient connection.
 
-    ON is deliberately unsupported until Phase D; existing reserved hidden_dim
-    and dropout options do not silently activate an MLP.
+    ON is identity-initialized Linear(D_e,D_e), trainable independently of frozen
+    cached features. Reserved hidden_dim/dropout never activate an extra MLP.
     """
 
     def __init__(self, input_dim: int, *, enabled: bool = False):
@@ -49,14 +49,30 @@ class EEGFeatureAdapter(nn.Identity):
         _positive_integer("input_dim", input_dim)
         if type(enabled) is not bool:
             raise ValueError("Feature adapter enabled must be boolean")
-        if enabled:
-            raise NotImplementedError("EEG feature adapter ON is deferred to Phase D; use enabled=false")
+        self.enabled = enabled
         self.input_dim = self.output_dim = input_dim
+        if enabled:
+            self.linear = nn.Linear(input_dim,input_dim)
+            nn.init.eye_(self.linear.weight);nn.init.zeros_(self.linear.bias)
+
+    def forward(self,value,*,eeg_mask=None):
+        if not self.enabled: return value
+        _floating_input(value,self.input_dim,self.linear.weight)
+        if eeg_mask is not None:
+            if (eeg_mask.dtype!=torch.bool or eeg_mask.shape!=value.shape[:2] or eeg_mask.device!=value.device):
+                raise ValueError("Adapter mask must be boolean [B,T] on input device")
+            value=value.masked_fill(~eeg_mask.unsqueeze(-1),0.)
+        if not bool(torch.isfinite(value).all()): raise ValueError("Nonfinite real adapter input")
+        result=self.linear(value)
+        if not bool(torch.isfinite(result).all()): raise ValueError("Nonfinite adapter output")
+        return result
 
     @classmethod
     def from_config(cls, config: ResolvedConfig) -> EEGFeatureAdapter:
         validate_config(config.settings)
         eeg = config.settings["eeg"]
+        if eeg["feature_adapter"]["enabled"] and not config.settings.get("ablation",{}).get("enabled",False):
+            raise NotImplementedError("Feature adapter ON requires explicit Phase D opt-in")
         return cls(eeg["feature_dim"], enabled=eeg["feature_adapter"]["enabled"])
 
 
@@ -87,10 +103,12 @@ class LearnedQueryAttentionPooling(nn.Module):
         validate_config(config.settings)
         eeg = config.settings["eeg"]
         pooling = eeg["pooling"]
+        if pooling["type"] != "attention":
+            raise ValueError("Typed attention factory requires attention; use build_eeg_pooling")
         # Construction stays modular. Do not accidentally bypass an unsupported
         # adapter request simply because the caller builds pooling on its own.
-        if eeg["feature_adapter"]["enabled"]:
-            raise NotImplementedError("EEG feature adapter ON is deferred to Phase D")
+        if eeg["feature_adapter"]["enabled"] and not config.settings.get("ablation",{}).get("enabled",False):
+            raise NotImplementedError("Feature adapter ON requires explicit Phase D opt-in")
         return cls(eeg["feature_dim"], num_queries=pooling["num_queries"],
                    hidden_dim=pooling["hidden_dim"], num_heads=pooling["num_heads"])
 
@@ -119,3 +137,42 @@ class LearnedQueryAttentionPooling(nn.Module):
         if not bool(torch.isfinite(pooled).all()):
             raise ValueError("Nonfinite attention pooling output")
         return pooled
+
+
+class MaskedReductionPooling(nn.Module):
+    """Masked raw-feature mean/max -> Linear(D_e,D_p) -> one EEG vector.
+
+    This has one query-equivalent output, never replicated K tokens. The learned
+    projection preserves downstream widths; attention capacity is removed.
+    """
+    def __init__(self,input_dim,*,hidden_dim=256,kind="mean"):
+        super().__init__()
+        _positive_integer("input_dim",input_dim);_positive_integer("hidden_dim",hidden_dim)
+        if kind not in ("mean","max"): raise ValueError("Unsupported masked reduction")
+        self.input_dim,self.hidden_dim,self.num_queries,self.kind=input_dim,hidden_dim,1,kind
+        self.input_projection=nn.Linear(input_dim,hidden_dim)
+
+    def forward(self,eeg_features,eeg_mask,*,artifact_flags=None):
+        _floating_input(eeg_features,self.input_dim,self.input_projection.weight)
+        if (not isinstance(eeg_mask,torch.Tensor) or eeg_mask.dtype!=torch.bool
+                or eeg_mask.shape!=eeg_features.shape[:2] or eeg_mask.device!=eeg_features.device
+                or not bool(eeg_mask.any(dim=1).all())):
+            raise ValueError("Mask requires real segments for every subject")
+        if artifact_flags is not None and (not isinstance(artifact_flags,torch.Tensor)
+                or artifact_flags.dtype!=torch.bool or artifact_flags.shape!=eeg_mask.shape
+                or artifact_flags.device!=eeg_mask.device):
+            raise ValueError("Artifact flags are separate boolean metadata")
+        clean=eeg_features.masked_fill(~eeg_mask.unsqueeze(-1),0.)
+        if not bool(torch.isfinite(clean).all()): raise ValueError("Real EEG features must be finite")
+        if self.kind=="mean": reduced=clean.sum(1)/eeg_mask.sum(1,keepdim=True)
+        else: reduced=clean.masked_fill(~eeg_mask.unsqueeze(-1),float("-inf")).amax(1)
+        output=self.input_projection(reduced).unsqueeze(1)
+        if not bool(torch.isfinite(output).all()): raise ValueError("Nonfinite reduction output")
+        return output
+
+
+def build_eeg_pooling(config):
+    validate_config(config.settings)
+    eeg=config.settings["eeg"];options=eeg["pooling"]
+    if options["type"]=="attention": return LearnedQueryAttentionPooling.from_config(config)
+    return MaskedReductionPooling(eeg["feature_dim"],hidden_dim=options["hidden_dim"],kind=options["type"])

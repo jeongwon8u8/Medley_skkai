@@ -32,7 +32,8 @@ def save_checkpoint(model, path, *, parameter_selector, identity_builder, label,
     config = model.backbone.resolved_config.to_dict()
     (path / "resolved_config.json").write_text(json.dumps(config, sort_keys=True, indent=2), encoding="utf-8")
     metadata = dict(identity=identity, weights_sha256=hashlib.sha256((path / "trainable.safetensors").read_bytes()).hexdigest(),
-                    epochs_completed=epochs_completed, optimizer_steps=optimizer_steps, git_revision=revision)
+                    epochs_completed=epochs_completed, optimizer_steps=optimizer_steps, git_revision=revision,
+                    trainable_parameters=sum(p.numel() for p in model.parameters() if p.requires_grad))
     (path / "manifest.json").write_text(json.dumps(metadata, sort_keys=True, indent=2), encoding="utf-8")
     return path
 

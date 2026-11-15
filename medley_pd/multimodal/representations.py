@@ -8,7 +8,7 @@ from .clinical_regressor import clinical_prediction_state
 from .clinical_serializer import ClinicalTextSerializer
 from .clinical_tokenization import ClinicalTokenizer
 from .config import FUSION_A_DEFAULTS, validate_config
-from .eeg_pooling import EEGFeatureAdapter, LearnedQueryAttentionPooling
+from .eeg_pooling import EEGFeatureAdapter, LearnedQueryAttentionPooling, MaskedReductionPooling, build_eeg_pooling
 from .llm_backbone import parameter_statistics
 
 
@@ -56,14 +56,14 @@ class EEGRepresentationEncoder(nn.Module):
         super().__init__()
         validate_config(config.settings)
         options = {**FUSION_A_DEFAULTS, **config.settings.get("fusion_a", {})}
-        self.feature_adapter = EEGFeatureAdapter.from_config(config)
-        self.pooling = LearnedQueryAttentionPooling.from_config(config).to(device=device, dtype=torch.float32)
+        self.feature_adapter = EEGFeatureAdapter.from_config(config).to(device=device, dtype=torch.float32)
+        self.pooling = build_eeg_pooling(config).to(device=device, dtype=torch.float32)
         self.aggregation = MeanQueryAggregation(options["query_aggregation"])
         self.projection = RepresentationProjection(config.settings["eeg"]["pooling"]["hidden_dim"],
                                                    options["eeg_projection_dim"], device=device)
 
     def forward(self, *, eeg_features, eeg_mask, artifact_flags=None):
-        pooled = self.pooling(self.feature_adapter(eeg_features), eeg_mask, artifact_flags=artifact_flags)
+        pooled = self.pooling(self.feature_adapter(eeg_features,eeg_mask=eeg_mask), eeg_mask, artifact_flags=artifact_flags)
         return self.projection(self.aggregation(pooled))
 
 

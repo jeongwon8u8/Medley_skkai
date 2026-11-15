@@ -13,7 +13,7 @@ from torch import nn
 from .clinical_serializer import ClinicalTextSerializer
 from .clinical_tokenization import ClinicalTokens, ClinicalTokenizer
 from .config import validate_config
-from .eeg_pooling import EEGFeatureAdapter, LearnedQueryAttentionPooling
+from .eeg_pooling import EEGFeatureAdapter, LearnedQueryAttentionPooling, MaskedReductionPooling, build_eeg_pooling
 from .eeg_projection import EEGToLLMProjector
 from .llm_backbone import LLMBackbone, parameter_statistics, select_prediction_state
 
@@ -92,25 +92,27 @@ class EEGClinicalSoftTokenRegressor(nn.Module):
         if backbone.mode in ("lora", "qlora") and not stats["trainable_lora_parameters"]:
             raise ValueError("Adapter mode requires prepared Task 4 LoRA parameters")
         eeg = config.settings["eeg"]
-        if eeg["feature_adapter"]["enabled"]:
-            raise NotImplementedError("EEG feature adapter ON is deferred to Phase D")
+        if eeg["feature_adapter"]["enabled"] and not config.settings.get("ablation",{}).get("enabled",False):
+            raise NotImplementedError("Feature adapter ON requires explicit Phase D opt-in")
         if eeg["projector"].get("output_dim") not in (None, backbone.hidden_dim):
             raise ValueError("Configured EEG projection width disagrees with actual LLM hidden_dim")
         device = backbone.embedding_layer.weight.device
         self.backbone = backbone
         self.llm = backbone.model
-        self.feature_adapter = (EEGFeatureAdapter.from_config(config) if feature_adapter is None else feature_adapter)
-        self.pooling = (LearnedQueryAttentionPooling.from_config(config).to(device=device, dtype=torch.float32)
+        self.feature_adapter = (EEGFeatureAdapter.from_config(config).to(device=device,dtype=torch.float32) if feature_adapter is None else feature_adapter)
+        self.pooling = (build_eeg_pooling(config).to(device=device, dtype=torch.float32)
                         if pooling is None else pooling)
         self.projector = (EEGToLLMProjector.from_config(config, hidden_dim=backbone.hidden_dim).to(device=device, dtype=torch.float32)
                           if projector is None else projector)
-        if not isinstance(self.feature_adapter, EEGFeatureAdapter) or self.feature_adapter.input_dim != eeg["feature_dim"]:
+        if not isinstance(self.feature_adapter, EEGFeatureAdapter) or self.feature_adapter.input_dim != eeg["feature_dim"] or self.feature_adapter.enabled != eeg["feature_adapter"]["enabled"]:
             raise ValueError("Use an A1 identity feature adapter matching the cached feature width")
-        if (not isinstance(self.pooling, LearnedQueryAttentionPooling)
+        if (not isinstance(self.pooling, (LearnedQueryAttentionPooling, MaskedReductionPooling))
                 or self.pooling.input_dim != eeg["feature_dim"]
                 or self.pooling.num_queries != eeg["pooling"]["num_queries"]
                 or self.pooling.hidden_dim != eeg["pooling"]["hidden_dim"]
-                or self.pooling.attention.num_heads != eeg["pooling"]["num_heads"]):
+                or (isinstance(self.pooling, LearnedQueryAttentionPooling) and self.pooling.attention.num_heads != eeg["pooling"]["num_heads"])
+                or (eeg["pooling"]["type"] == "attention") != isinstance(self.pooling, LearnedQueryAttentionPooling)
+                or (isinstance(self.pooling, MaskedReductionPooling) and self.pooling.kind != eeg["pooling"]["type"])):
             raise ValueError("Injected A1 pooling must match the resolved EEG configuration")
         if (not isinstance(self.projector, EEGToLLMProjector)
                 or self.projector.input_dim != self.pooling.hidden_dim or self.projector.output_dim != backbone.hidden_dim
@@ -134,7 +136,7 @@ class EEGClinicalSoftTokenRegressor(nn.Module):
         """
         texts = self.serializer.serialize_batch(clinical)
         text_tokens = self.tokenizer(texts).to(self.backbone.embedding_layer.weight.device)
-        pooled = self.pooling(self.feature_adapter(eeg_features), eeg_mask, artifact_flags=artifact_flags)
+        pooled = self.pooling(self.feature_adapter(eeg_features,eeg_mask=eeg_mask), eeg_mask, artifact_flags=artifact_flags)
         return assemble_soft_token_inputs(self.backbone, self.projector(pooled), text_tokens)
 
     def forward(self, *, eeg_features: torch.Tensor, eeg_mask: torch.Tensor,

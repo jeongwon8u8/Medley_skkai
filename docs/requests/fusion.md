@@ -61,3 +61,13 @@ torch-free config module preserving the clinical checkpoint helper name; C2
 completion validation keeps its full default while exposing explicit byte-hash
 verification for prediction-only C3 (no tensor/model loading). No source artifacts,
 metrics, prior tests, model/trainer behavior or fixed assignments are changed.
+
+## Phase D — 2026-11-15
+
+User authorizes sequential D1–D4 implementation, synthetic bounded training,
+independent review, one commit and development-branch push. Shared changes add
+explicit Phase D opt-in, controlled variants, modular pooling/adapter/numeric
+branch support, architecture-aware checkpoint identity, and C2/C3 integration.
+Preserve old defaults/tests, fixed splits, baseline predictions and caches.
+Numeric skip initially supports only M2 with predictor-only encoding and no
+fitted scaling; M1/M3 requests are rejected. No real experiment is authorized.

@@ -17,7 +17,7 @@ def build_optimizer(model):
         ("clinical_projection",model.clinical_encoder.projection,options["lr_clinical_projection"]),
         ("fusion",model.head,options["lr_fusion"]),
         ("feature_adapter",model.eeg_encoder.feature_adapter,options["lr_feature_adapter"]),
-    ])
+    ]+([("numeric_branch",model.numeric_branch,None)] if model.numeric_branch is not None else []))
 
 
 class FusionATrainer(ClinicalTrainer):

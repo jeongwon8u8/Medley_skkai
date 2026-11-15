@@ -64,13 +64,16 @@ def comparison_conditions(candidate,reference,runs,*,synthetic=False,allowed_dif
             ca,cb=a["checkpoint_identity"],b["checkpoint_identity"]
             llm_ablation=bool({"settings.llm.model_id","settings.llm.revision"} & allowed)
             same_base=all(ca.get(p)==cb.get(p) for p in ("model_id","revision","synthetic_frozen_digest","base_config_digest"))
+            if synthetic and "settings.llm.tuning" in allowed:
+                canonical_a,canonical_b=(cp.get("canonical_synthetic_base_digest") for cp in (ca,cb))
+                same_base |= bool(canonical_a and canonical_a==canonical_b and all(ca.get(p)==cb.get(p) for p in ("model_id","revision","base_config_digest")))
             checks["llm_base"] &= _base_known(a,synthetic) and _base_known(b,synthetic) and (same_base or llm_ablation)
             checks["tokenizer"] &= bool(ca.get("tokenizer_digest") and cb.get("tokenizer_digest")) and (ca["tokenizer_digest"]==cb["tokenizer_digest"] or llm_ablation)
         else:
             checks["llm_base"]=False;checks["tokenizer"]=False
         architecture_equal &= ia["architecture"]==ib["architecture"]
         config_a,config_b=(r["manifest"]["resolved_config"]["settings"] for r in (a,b))
-        intrinsic_equal &= all(config_a.get(name)==config_b.get(name) for name in ("fusion","fusion_a","fusion_b_training"))
+        intrinsic_equal &= all(config_a.get(name)==config_b.get(name) for name in ("fusion","fusion_a","fusion_b_training","ablation"))
     reasons=sorted([name for name,value in checks.items() if not value]+list(disallowed))
     comparable=all(checks.values()) and not disallowed
     return {"checks":checks,"recorded_protocol_comparable":comparable,

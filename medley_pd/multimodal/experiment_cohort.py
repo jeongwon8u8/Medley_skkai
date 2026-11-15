@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from .clinical_serializer import ClinicalTextSerializer
+from .numeric_encoding import encode_numeric_record
 from .data_adapter import SubjectRecord, SubjectSplit, validate_subject_partition
 from .experiment_protocol import ProtocolError, fingerprint, subject_ids
 
@@ -88,7 +89,10 @@ def validate_cohort(config, adapter, source_subjects):
             raise ProtocolError("cohort_record", "A source subject failed EEG, clinical, target or metadata validation") from None
         metadata.append(SubjectMetadata(sid, float(target), record.subgroup))
         caches.append([sid, _array_digest(eeg), _array_digest(flags)])
-        clinical.append([sid, fingerprint(text)])
+        # Phase D attests raw approved predictors for BOTH skip OFF and ON.
+        # Text rounding alone cannot pin the additional numeric branch's inputs.
+        clinical_input={"text":text,"raw_numeric":encode_numeric_record(serializer,record.clinical)} if config.settings.get("ablation",{}).get("enabled",False) else text
+        clinical.append([sid, fingerprint(clinical_input)])
     identity = [[m.subject, m.target, m.subgroup] for m in metadata]
     return CohortSnapshot(expected, tuple(metadata), fingerprint(identity), fingerprint(caches),
                           fingerprint(clinical), getattr(adapter, "cache_spec_status", "unverified"))

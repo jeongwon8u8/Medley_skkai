@@ -8,6 +8,7 @@ from torch import nn
 
 from .config import FUSION_A_DEFAULTS, validate_config
 from .representations import EEGRepresentationEncoder, ClinicalRepresentationEncoder
+from .numeric_branch import NumericClinicalBranch
 
 
 @dataclass(frozen=True)
@@ -70,7 +71,9 @@ class EEGClinicalRepresentationFusionRegressor(nn.Module):
         self.eeg_encoder=EEGRepresentationEncoder(config,device=device)
         self.clinical_encoder=ClinicalRepresentationEncoder(backbone)
         options={**FUSION_A_DEFAULTS,**config.settings.get("fusion_a",{})}
-        self.head=RepresentationFusionHead(options["eeg_projection_dim"],options["clinical_projection_dim"],
+        self.numeric_branch=NumericClinicalBranch(config,device=device) if config.settings["fusion"]["numeric_skip"] else None
+        numeric_dim=0 if self.numeric_branch is None else self.numeric_branch.output_dim
+        self.head=RepresentationFusionHead(options["eeg_projection_dim"],options["clinical_projection_dim"]+numeric_dim,
                                            config.settings["fusion"]["fusion_dim"],
                                            config.settings["fusion"]["dropout"],device=device)
 
@@ -100,4 +103,7 @@ class EEGClinicalRepresentationFusionRegressor(nn.Module):
     def forward(self, *, eeg_features, eeg_mask, clinical, artifact_flags=None):
         vectors=self.extract_representations(eeg_features=eeg_features,eeg_mask=eeg_mask,
                                              clinical=clinical,artifact_flags=artifact_flags)
-        return self.head(vectors.eeg,vectors.clinical)
+        clinical_vector=vectors.clinical
+        if self.numeric_branch is not None:
+            clinical_vector=torch.cat([clinical_vector,self.numeric_branch(clinical)],dim=-1)
+        return self.head(vectors.eeg,clinical_vector)
