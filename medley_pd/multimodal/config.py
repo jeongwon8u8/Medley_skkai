@@ -54,6 +54,10 @@ PROTOCOL_DEFAULTS = {
     "strict_comparability": True, "manifest_dir": "outputs/multimodal_runs",
     "target_atol": 1e-5,
 }
+RUNNER_DEFAULTS = {
+    "selection_metric": "MAE", "min_delta": 0.0, "shuffle_train": True,
+    "num_workers": 0, "baseline_path": None, "baseline_model": None,
+}
 # Field names are a schema, not a second set of experiment/preprocessing values.
 _SCHEMA: JsonDict = {
     **dict.fromkeys(("schema_version", "architecture", "experiment_name", "dataset", "task", "clinical_set")),
@@ -79,6 +83,7 @@ _SCHEMA["clinical_regression"] = dict.fromkeys(CLINICAL_REGRESSION_DEFAULTS)
 _SCHEMA["fusion_b_training"] = dict.fromkeys(FUSION_B_TRAINING_DEFAULTS)
 _SCHEMA["fusion_a"] = dict.fromkeys(FUSION_A_DEFAULTS)
 _SCHEMA["protocol"] = dict.fromkeys(PROTOCOL_DEFAULTS)
+_SCHEMA["runner"] = dict.fromkeys(RUNNER_DEFAULTS)
 
 
 def _with_optional_defaults(settings: Any) -> Any:
@@ -106,6 +111,10 @@ def _with_optional_defaults(settings: Any) -> Any:
             result["protocol"] = copy.deepcopy(PROTOCOL_DEFAULTS)
         elif isinstance(result["protocol"], dict):
             result["protocol"] = {**PROTOCOL_DEFAULTS, **result["protocol"]}
+        if "runner" not in result:
+            result["runner"] = copy.deepcopy(RUNNER_DEFAULTS)
+        elif isinstance(result["runner"], dict):
+            result["runner"] = {**RUNNER_DEFAULTS, **result["runner"]}
         # A1 optional fields preserve earlier JSON and resolved snapshots.
         if isinstance(result.get("eeg"), dict):
             result["eeg"].setdefault("seed", 0)
@@ -249,6 +258,14 @@ def validate_config(settings: JsonDict) -> None:
     directory = settings["protocol"]["manifest_dir"]
     if not isinstance(directory, str) or not directory.strip():
         raise ConfigError("protocol.manifest_dir must be a nonempty private output path")
+    _choice(settings, "runner.selection_metric", ("MAE",))
+    _choice(settings, "runner.shuffle_train", (True, False))
+    _choice(settings, "runner.num_workers", (0,))
+    _number(settings, "runner.min_delta", strict=False)
+    for key in ("baseline_path", "baseline_model"):
+        value = settings["runner"][key]
+        if value is not None and (not isinstance(value, str) or not value.strip()):
+            raise ConfigError(f"runner.{key} must be null or a nonempty string")
     name = settings["experiment_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
         raise ConfigError("experiment_name must be 1–128 ASCII letters/digits/underscores/hyphens, starting with a letter or digit")

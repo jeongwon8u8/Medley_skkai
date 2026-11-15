@@ -44,3 +44,11 @@ commit/push. Add optional protocol policies, reuse existing split_root, seed/fol
 selection and training.validation_fraction. Exclude protocol-only settings from
 inference checkpoint identity to preserve previous M1/M2/M3 files. No outer CSV,
 preprocessing, features, model behavior, baseline output or earlier test changes.
+
+## Phase C2 — 2026-11-15
+
+User authorizes runner/registry/early-stopping/run-state/CLI integration and
+commit/push. Add only missing runner selection/dataloader/M0-reference settings;
+reuse existing training defaults and C1 manifests. Exclude orchestration-only
+runner settings from inference checkpoint digests to preserve old checkpoints.
+No changes to model definitions, optimizer groups, outer splits or baseline files.
