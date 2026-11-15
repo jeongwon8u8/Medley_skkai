@@ -1,0 +1,6 @@
+{
+  "extends": "base.json",
+  "architecture": "clinical_only",
+  "experiment_name": "pd_clinical_llm_v1",
+  "fusion": {"type": "none"}
+}
