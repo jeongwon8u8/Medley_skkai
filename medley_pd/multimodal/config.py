@@ -36,6 +36,11 @@ CLINICAL_TEXT_DEFAULTS = {
     "extra_approved_policy": "reject",
     "sex_code_mapping": None,
 }
+# Minimal M1 options; other optimization/loss/token budgets already exist.
+CLINICAL_REGRESSION_DEFAULTS = {
+    "prediction_suffix": "Predicted MoCA:", "head_type": "linear",
+    "mixed_precision": "none", "random_seed": 0,
+}
 # Field names are a schema, not a second set of experiment/preprocessing values.
 _SCHEMA: JsonDict = {
     **dict.fromkeys(("schema_version", "architecture", "experiment_name", "dataset", "task", "clinical_set")),
@@ -57,6 +62,7 @@ _SCHEMA: JsonDict = {
 }
 _SCHEMA["llm"].update(dict.fromkeys(LLM_RUNTIME_DEFAULTS))
 _SCHEMA["clinical_text"] = dict.fromkeys(CLINICAL_TEXT_DEFAULTS)
+_SCHEMA["clinical_regression"] = dict.fromkeys(CLINICAL_REGRESSION_DEFAULTS)
 
 
 def _with_optional_defaults(settings: Any) -> Any:
@@ -68,6 +74,10 @@ def _with_optional_defaults(settings: Any) -> Any:
             result["clinical_text"] = copy.deepcopy(CLINICAL_TEXT_DEFAULTS)
         elif isinstance(result["clinical_text"], dict):
             result["clinical_text"] = {**copy.deepcopy(CLINICAL_TEXT_DEFAULTS), **result["clinical_text"]}
+        if "clinical_regression" not in result:
+            result["clinical_regression"] = copy.deepcopy(CLINICAL_REGRESSION_DEFAULTS)
+        elif isinstance(result["clinical_regression"], dict):
+            result["clinical_regression"] = {**copy.deepcopy(CLINICAL_REGRESSION_DEFAULTS), **result["clinical_regression"]}
     return result
 
 
@@ -185,6 +195,10 @@ def validate_config(settings: JsonDict) -> None:
                or not isinstance(v, str) or v not in ("female", "male") for k, v in mapping.items())
     ):
         raise ConfigError("clinical_text.sex_code_mapping must be null or verified integer-code strings mapped to female/male")
+    _choice(settings, "clinical_regression.prediction_suffix", ("Predicted MoCA:",))
+    _choice(settings, "clinical_regression.head_type", ("linear",))
+    _choice(settings, "clinical_regression.mixed_precision", ("none", "bfloat16"))
+    _number(settings, "clinical_regression.random_seed", integer=True, strict=False, maximum=2**32)
     name = settings["experiment_name"]
     if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{0,127}", name):
         raise ConfigError("experiment_name must be 1–128 ASCII letters/digits/underscores/hyphens, starting with a letter or digit")
