@@ -26,7 +26,7 @@ Modified only `medley_pd/multimodal/config.py` to add backward-compatible option
 | `backbone.embedding_layer`, `.hidden_dim` | Actual token embedding module and width H; width is not guessed from model branding |
 | `backbone.forward_hidden(input_ids=..., inputs_embeds=..., attention_mask=...)` | Final layer `[B,L,H]`; exactly one input representation; explicit binary mask required |
 | `select_prediction_state(hidden, attention_mask, positions=None)` | `[B,H]` at each row's last real position, or explicit int64 `[B]` positions; must select unmasked positions |
-| `resolve_lora_targets(model, requested)` | Actual supported Linear/Conv1D modules, not a fixed family-independent q_proj assumption |
+| `resolve_lora_targets(model, requested)` | Supported Linear, Conv1D and bitsandbytes Linear4bit paths, with a Qwen3 NF4 default |
 | `parameter_statistics(model)` | Total/trainable count and percentage, base freezing and trainable LoRA counts. Uses HF/PEFT count APIs where available, including their quantized-weight accounting |
 | `backbone.metadata()` | Model type/ID, requested/resolved revision, embedding dtype/device, hidden size, pad settings, chat-template presence, actual LoRA targets and parameter statistics |
 | `backbone.resolved_config` | Effective Task 1-compatible snapshot: actual padding side, device, selected target modules and model commit hash as revision when available |
@@ -52,7 +52,7 @@ All pretrained parameters are frozen and no LoRA adapters are attached. Already 
 
 ### LoRA
 
-Full-precision loading follows compute_dtype, base parameters are frozen, and PEFT attaches only trainable LoRA weights with configured rank/alpha/dropout and bias=none. Null target_modules means enumerate actual supported Linear/Conv1D modules while excluding the LM output head. Explicit target names match exact qualified names or suffixes; unmatched targets fail. This supports GPT2 Conv1D projections and Qwen/Gemma Linear projections without assuming identical names. The resolved full target list is recorded for snapshots.
+Full-precision loading follows compute_dtype, base parameters are frozen, and PEFT attaches only trainable LoRA weights with configured rank/alpha/dropout and bias=none. Qwen3 QLoRA defaults to `q_proj` and `v_proj`; other models and full-precision LoRA keep architecture-based target discovery. Explicit target names match exact qualified names or suffixes; unmatched targets fail. The LM output head is excluded. PEFT receives exact resolved paths via a regex, and attachment is checked against those paths. Effective snapshots retain the full list. To reload an earlier Qwen3 QLoRA checkpoint whose targets differ from the new default, reconstruct the original model using its saved effective target list.
 
 ### QLoRA
 
@@ -142,7 +142,7 @@ Observed facts:
 
 `estimate_parameter_storage(4_000_000_000)` gives hypothetical **weight-only** estimates: FP32 16 GB decimal, BF16/FP16 8 GB and packed NF4 lower bound 2 GB. The 4B count is a caller/default hypothetical, not inferred from an unselected model. Quantization metadata/unquantized layers, LoRA, optimizer state, activations, attention, CUDA workspaces and allocator overhead are excluded. `fit_in_24gb_verified` is False. No claim that a 4B model fits or trains follows from these numbers.
 
-With explicit real-model load enabled, preflight can run three synthetic token positions through IDs and external embeddings, measure input gradients/base freezing and record actual CUDA peak allocations. That path was not executed on pretrained or quantized GPU weights in this task. The forward interface currently requests the causal LM's hidden-state output (and can incur its normal logits/intermediate-state overhead); it is not a memory-optimized 4B benchmark.
+With explicit real-model load enabled, preflight can run three synthetic token positions through IDs and external embeddings, measure input gradients/base freezing and record actual CUDA peak allocations. The hidden-state forward retains the causal LM and PEFT call path. Qwen3 with `logits_to_keep` support computes only last-token logits while returning the full final hidden state. Earlier GPU results in this document do not validate this update.
 
 ## CPU tests and smoke results
 
