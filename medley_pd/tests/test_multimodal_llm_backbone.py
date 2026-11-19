@@ -14,7 +14,8 @@ from tokenizers import Tokenizer
 from tokenizers.models import WordLevel
 from tokenizers.pre_tokenizers import Whitespace
 from transformers import (GPT2Config, GPT2LMHeadModel, Qwen2Config, Qwen2ForCausalLM,
-                          GemmaConfig, GemmaForCausalLM, PreTrainedTokenizerFast)
+                          Qwen3Config, Qwen3ForCausalLM, GemmaConfig, GemmaForCausalLM,
+                          PreTrainedTokenizerFast)
 
 APP = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(APP))
@@ -54,7 +55,11 @@ def tiny_model(family="gpt2"):
                          resid_pdrop=0, embd_pdrop=0, attn_pdrop=0)
         model = GPT2LMHeadModel(cfg)
     else:
-        cls, model_cls = (Qwen2Config, Qwen2ForCausalLM) if family == "qwen2" else (GemmaConfig, GemmaForCausalLM)
+        cls, model_cls = {
+            "qwen2": (Qwen2Config, Qwen2ForCausalLM),
+            "qwen3": (Qwen3Config, Qwen3ForCausalLM),
+            "gemma": (GemmaConfig, GemmaForCausalLM),
+        }[family]
         cfg = cls(vocab_size=16, hidden_size=16, intermediate_size=32, num_hidden_layers=1,
                   num_attention_heads=2, num_key_value_heads=2, head_dim=8,
                   max_position_embeddings=32, bos_token_id=2, eos_token_id=2, pad_token_id=0)
@@ -63,7 +68,7 @@ def tiny_model(family="gpt2"):
     return model
 
 
-@pytest.mark.parametrize("family", ["gpt2", "qwen2", "gemma"])
+@pytest.mark.parametrize("family", ["gpt2", "qwen2", "qwen3", "gemma"])
 @pytest.mark.parametrize("mode", ["frozen", "lora"])
 def test_tiny_backbone_modes_shapes_and_backward(family, mode):
     backbone = prepare_llm_backbone(configuration(mode), tiny_model(family), tokenizer())
@@ -150,6 +155,56 @@ def test_lora_targets_are_actual_modules_and_explicit_targets_checked():
     assert targets and all(name.endswith(("q_proj", "v_proj")) for name in targets)
     with pytest.raises(BackboneError, match="target"):
         resolve_lora_targets(tiny_model(), ["does_not_exist"])
+
+
+def test_qwen3_quantized_target_selection_with_synthetic_linear4bit_type():
+    class Linear4bit(torch.nn.Module):
+        pass
+
+    model = tiny_model("qwen3")
+    model.is_loaded_in_4bit = True
+    layer = model.model.layers[0].self_attn
+    layer.q_proj = Linear4bit()
+    layer.v_proj = Linear4bit()
+    prefix = "model.layers.0.self_attn."
+    assert resolve_lora_targets(model, None, linear4bit=Linear4bit) == [
+        prefix + "q_proj", prefix + "v_proj",
+    ]
+    assert resolve_lora_targets(model, ["k_proj"], linear4bit=Linear4bit) == [prefix + "k_proj"]
+    with pytest.raises(BackboneError, match="target"):
+        resolve_lora_targets(model, ["lm_head"], linear4bit=Linear4bit)
+
+
+def test_peft_exact_paths_do_not_attach_to_matching_suffix():
+    from peft.tuners.lora import LoraLayer
+
+    model = tiny_model("qwen3")
+    target = "model.layers.0.self_attn.q_proj"
+    # PEFT's list matching would also try to wrap this unsupported suffix match.
+    model.extra = torch.nn.Module()
+    model.extra.model = tiny_model("qwen3").model
+    model.extra.model.layers[0].self_attn.q_proj = torch.nn.Identity()
+    backbone = prepare_llm_backbone(configuration("lora", [f'llm.target_modules=["{target}"]']),
+                                    model, tokenizer())
+    assert isinstance(model.get_submodule(target), LoraLayer)
+    assert isinstance(model.get_submodule("extra." + target), torch.nn.Identity)
+    assert backbone.target_modules == (target,)
+
+
+def test_qwen3_peft_forward_limits_logits_without_truncating_hidden_states():
+    backbone = prepare_llm_backbone(configuration("lora"), tiny_model("qwen3"), tokenizer())
+    head = backbone.model.get_output_embeddings()
+    logit_input_lengths = []
+    handle = head.register_forward_pre_hook(
+        lambda _module, args: logit_input_lengths.append(args[0].shape[1])
+    )
+    try:
+        hidden = backbone.forward_hidden(input_ids=torch.tensor([[3, 4, 5]]),
+                                         attention_mask=torch.ones(1, 3))
+    finally:
+        handle.remove()
+    assert hidden.shape == (1, 3, 16)
+    assert logit_input_lengths == [1]
 
 
 def test_multimodal_and_encoder_decoder_metadata_fail():
@@ -280,10 +335,41 @@ def test_old_snapshot_optional_defaults_and_unknown_keys(tmp_path):
                     or not os.environ.get("MEDLEY_TEST_CACHED_LLM"),
                     reason="Actual GPU NF4 requires CUDA, bitsandbytes and explicit MEDLEY_TEST_CACHED_LLM local-model opt-in")
 def test_opt_in_actual_qlora_gpu():
+    from multimodal.fusion_b import EEGClinicalSoftTokenRegressor
+    from multimodal.fusion_b_trainer import build_optimizer
+
     path = Path(os.environ["MEDLEY_TEST_CACHED_LLM"])
     assert path.is_dir(), "GPU opt-in requires a local model directory; downloads remain disabled"
     cfg = configuration("qlora", [f"llm.model_id={path}", "llm.device=cuda:0", "llm.compute_dtype=bfloat16"])
     backbone = load_llm_backbone(cfg)
+    if backbone.model.config.model_type == "qwen3":
+        assert {name.rsplit(".", 1)[-1] for name in backbone.target_modules} == {"q_proj", "v_proj"}
+    backbone.model.train()
     report = probe_backbone(backbone)
     assert report["external_embedding_gradients_finite_nonzero"] and report["lora_nonzero_gradient_observed"]
     assert report["base_gradients_absent"]
+
+    model = EEGClinicalSoftTokenRegressor(backbone).train()
+    optimizer = build_optimizer(model)
+    optimizer.zero_grad(set_to_none=True)
+    device = backbone.embedding_layer.weight.device
+    width = cfg.settings["eeg"]["feature_dim"]
+    prediction = model(
+        eeg_features=torch.randn(1, 3, width, device=device),
+        eeg_mask=torch.tensor([[True, True, False]], device=device),
+        clinical=[{"age": 68., "sex": None, "updrs_part_iii": 24.,
+                   "disease_duration": 6.5, "ledd": None}],
+    )
+    assert prediction.shape == (1,)
+    (prediction - 20.).square().mean().backward()
+    for module in (model.pooling, model.projector):
+        gradients = [p.grad for p in module.parameters()]
+        assert all(grad is not None and torch.isfinite(grad).all() for grad in gradients)
+        assert any(torch.count_nonzero(grad) for grad in gradients)
+    lora = [p for name, p in model.llm.named_parameters() if "lora_" in name]
+    optimizer_lora = next(group["params"] for group in optimizer.param_groups if group["name"] == "lora")
+    assert len(optimizer_lora) == len(lora) and {id(p) for p in optimizer_lora} == {id(p) for p in lora}
+    assert all(p.grad is not None and torch.isfinite(p.grad).all() for p in lora)
+    assert any(torch.count_nonzero(p.grad) for p in lora)
+    assert all(p.grad is None for p in model.llm.parameters() if not p.requires_grad)
+    optimizer.step()
