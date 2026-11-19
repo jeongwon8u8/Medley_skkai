@@ -4,10 +4,14 @@ No encoder execution, clinical/label access, temporal truncation or LLM fusion.
 """
 from __future__ import annotations
 
+import logging
+
 import torch
 from torch import nn
 
 from .config import ResolvedConfig, validate_config
+
+logger = logging.getLogger(__name__)
 
 
 def _positive_integer(name: str, value: int) -> None:
@@ -40,11 +44,11 @@ def seed_eeg_modules(config: ResolvedConfig) -> int:
 class EEGFeatureAdapter(nn.Identity):
     """OFF is exact identity, including tensor identity and gradient connection.
 
-    ON is identity-initialized Linear(D_e,D_e), trainable independently of frozen
-    cached features. Reserved hidden_dim/dropout never activate an extra MLP.
+    ON adds a zero-initialized bottleneck residual to frozen cached features.
     """
 
-    def __init__(self, input_dim: int, *, enabled: bool = False):
+    def __init__(self, input_dim: int, *, enabled: bool = False,
+                 hidden_dim: int = 128, dropout: float = 0.1):
         super().__init__()
         _positive_integer("input_dim", input_dim)
         if type(enabled) is not bool:
@@ -52,19 +56,35 @@ class EEGFeatureAdapter(nn.Identity):
         self.enabled = enabled
         self.input_dim = self.output_dim = input_dim
         if enabled:
-            self.linear = nn.Linear(input_dim,input_dim)
-            nn.init.eye_(self.linear.weight);nn.init.zeros_(self.linear.bias)
+            _positive_integer("hidden_dim", hidden_dim)
+            self.norm = nn.LayerNorm(input_dim)
+            self.down = nn.Linear(input_dim, hidden_dim)
+            self.activation = nn.GELU()
+            self.dropout = nn.Dropout(dropout)
+            self.up = nn.Linear(hidden_dim, input_dim)
+            nn.init.zeros_(self.up.weight)
+            nn.init.zeros_(self.up.bias)
+        logger.info("EEG feature adapter enabled=%s trainable_parameters=%d",
+                    enabled, sum(p.numel() for p in self.parameters() if p.requires_grad))
 
-    def forward(self,value,*,eeg_mask=None):
-        if not self.enabled: return value
-        _floating_input(value,self.input_dim,self.linear.weight)
+    def forward(self, value: torch.Tensor, *, eeg_mask: torch.Tensor | None = None) -> torch.Tensor:
+        if not self.enabled:
+            return value
+        _floating_input(value, self.input_dim, self.down.weight)
+        padding = None
         if eeg_mask is not None:
-            if (eeg_mask.dtype!=torch.bool or eeg_mask.shape!=value.shape[:2] or eeg_mask.device!=value.device):
+            if (not isinstance(eeg_mask, torch.Tensor) or eeg_mask.dtype != torch.bool
+                    or eeg_mask.shape != value.shape[:2] or eeg_mask.device != value.device):
                 raise ValueError("Adapter mask must be boolean [B,T] on input device")
-            value=value.masked_fill(~eeg_mask.unsqueeze(-1),0.)
-        if not bool(torch.isfinite(value).all()): raise ValueError("Nonfinite real adapter input")
-        result=self.linear(value)
-        if not bool(torch.isfinite(result).all()): raise ValueError("Nonfinite adapter output")
+            padding = ~eeg_mask.unsqueeze(-1)
+            value = value.masked_fill(padding, 0.)
+        if not bool(torch.isfinite(value).all()):
+            raise ValueError("Nonfinite real adapter input")
+        result = value + self.up(self.dropout(self.activation(self.down(self.norm(value)))))
+        if padding is not None:
+            result = result.masked_fill(padding, 0.)
+        if not bool(torch.isfinite(result).all()):
+            raise ValueError("Nonfinite adapter output")
         return result
 
     @classmethod
@@ -73,7 +93,7 @@ class EEGFeatureAdapter(nn.Identity):
         eeg = config.settings["eeg"]
         if eeg["feature_adapter"]["enabled"] and not config.settings.get("ablation",{}).get("enabled",False):
             raise NotImplementedError("Feature adapter ON requires explicit Phase D opt-in")
-        return cls(eeg["feature_dim"], enabled=eeg["feature_adapter"]["enabled"])
+        return cls(eeg["feature_dim"], **eeg["feature_adapter"])
 
 
 class LearnedQueryAttentionPooling(nn.Module):
