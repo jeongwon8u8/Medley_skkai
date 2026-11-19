@@ -9,6 +9,7 @@ import copy
 from dataclasses import dataclass
 import importlib
 import inspect
+import re
 from typing import Any
 
 import torch
@@ -84,12 +85,18 @@ def _tokenizer_setup(tokenizer: Any, settings: dict[str, Any]) -> None:
     # Never add tokens or resize a quantized embedding matrix implicitly.
 
 
-def resolve_lora_targets(model: nn.Module, requested: list[str] | None) -> list[str]:
-    """Match actual Linear/Conv1D modules, excluding the output head by identity."""
+def resolve_lora_targets(model: nn.Module, requested: list[str] | None, *,
+                         linear4bit: type[nn.Module] | None = None) -> list[str]:
+    """Resolve supported layers to full paths, excluding the output head."""
     Conv1D = _dependency("transformers.pytorch_utils").Conv1D
+    supported = (nn.Linear, Conv1D) if linear4bit is None else (nn.Linear, Conv1D, linear4bit)
     output = model.get_output_embeddings()
     candidates = {name: module for name, module in model.named_modules()
-                  if name and isinstance(module, (nn.Linear, Conv1D)) and module is not output}
+                  if name and isinstance(module, supported) and module is not output
+                  and name.rsplit(".", 1)[-1] != "lm_head"}
+    if (requested is None and getattr(model, "is_loaded_in_4bit", False)
+            and getattr(model.config, "model_type", None) == "qwen3"):
+        requested = ["q_proj", "v_proj"]
     if requested is None:
         result = list(candidates)
     else:
@@ -206,9 +213,15 @@ class LLMBackbone:
         # Explicit position IDs keep real tokens at positions 0..N-1 under
         # either padding side. They do not define any prediction suffix.
         positions = valid.long().cumsum(dim=1).sub(1).clamp_min(0)
+        causal_lm = self.model.get_base_model() if self.target_modules else self.model
+        # Keep the PEFT forward path and request only the unused last-token logits.
+        options = {}
+        if (getattr(causal_lm.config, "model_type", None) == "qwen3"
+                and "logits_to_keep" in inspect.signature(causal_lm.forward).parameters):
+            options["logits_to_keep"] = 1
         output = self.model(input_ids=input_ids, inputs_embeds=inputs_embeds,
                             attention_mask=valid.long(), position_ids=positions,
-                            output_hidden_states=True, return_dict=True, use_cache=False)
+                            output_hidden_states=True, return_dict=True, use_cache=False, **options)
         states = getattr(output, "hidden_states", None)
         if not states or tuple(states[-1].shape) != (*source.shape[:2], self.hidden_dim):
             raise BackboneError("Model did not return final hidden states [B,L,H]")
@@ -242,6 +255,7 @@ def prepare_llm_backbone(config: ResolvedConfig, model: nn.Module, tokenizer: An
     mode = settings["tuning"]
     if hasattr(model, "peft_config"):
         raise BackboneError("Inject an unadapted base model, not an already PEFT-wrapped model")
+    linear4bit = None
     if settings["quantization"] == "nf4":
         bnb = require_quantization_backend()
         quant = getattr(model.config, "quantization_config", {})
@@ -249,7 +263,8 @@ def prepare_llm_backbone(config: ResolvedConfig, model: nn.Module, tokenizer: An
             quant = quant.to_dict()
         if not getattr(model, "is_loaded_in_4bit", False) or quant.get("bnb_4bit_quant_type") != "nf4":
             raise BackboneError("NF4 mode requires a genuinely 4-bit NF4-loaded model; full-precision LoRA is not QLoRA")
-        if not any(isinstance(module, bnb.nn.Linear4bit) and getattr(module.weight, "quant_state", None) is not None
+        linear4bit = bnb.nn.Linear4bit
+        if not any(isinstance(module, linear4bit) and getattr(module.weight, "quant_state", None) is not None
                    for module in model.modules()):
             raise BackboneError("Model has no genuinely quantized Linear4bit weights")
     elif getattr(model, "is_loaded_in_4bit", False) or getattr(model, "is_loaded_in_8bit", False):
@@ -263,10 +278,19 @@ def prepare_llm_backbone(config: ResolvedConfig, model: nn.Module, tokenizer: An
                                                     gradient_checkpointing_kwargs={"use_reentrant": False})
     if mode in ("lora", "qlora"):
         peft = _dependency("peft")
-        targets = resolve_lora_targets(model, settings["target_modules"])
+        targets = resolve_lora_targets(model, settings["target_modules"], linear4bit=linear4bit)
+        # PEFT treats a list as suffix matches. Use an escaped full-path regex
+        # so an identically suffixed module cannot be adapted accidentally.
+        exact_targets = "(?:" + "|".join(re.escape(name) for name in targets) + ")"
         options = peft.LoraConfig(task_type="CAUSAL_LM", r=settings["lora_r"], lora_alpha=settings["lora_alpha"],
-                                  lora_dropout=settings["lora_dropout"], target_modules=targets, bias="none")
+                                  lora_dropout=settings["lora_dropout"], target_modules=exact_targets, bias="none")
         model = peft.get_peft_model(model, options)
+        from peft.tuners.lora import LoraLayer
+
+        attached = {name for name, module in model.get_base_model().named_modules()
+                    if isinstance(module, LoraLayer)}
+        if attached != set(targets):
+            raise BackboneError("PEFT attached LoRA layers that differ from the resolved targets")
         stats = parameter_statistics(model)
         if not stats["base_frozen"] or stats["trainable_lora_parameters"] == 0:
             raise BackboneError("PEFT attachment did not leave only trainable LoRA parameters")
