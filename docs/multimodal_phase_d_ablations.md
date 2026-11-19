@@ -88,15 +88,24 @@ aggregation still produces one EEG representation; M3 reduction produces one
 actual LLM EEG prefix token. Attention and reductions have different parameter
 capacity, explicitly recorded rather than assumed equal.
 
-`EEGFeatureAdapter` OFF returns the identical input tensor and has no parameters.
-ON is `Linear(D_e,D_e)` with identity weight and zero bias initialization, no
-activation/dropout/residual network. Legacy reserved `feature_adapter.hidden_dim`
-and `dropout` fields do not define this linear adapter and remain reserved. ON
-requires explicit Phase D opt-in in config factories. The adapter sanitizes padded
-positions before Linear to prevent NaN/Inf gradient contamination. New modules
-are placed on the LLM device in float32; frozen EEG encoders never enter the model.
-A CBraMod adapter adds 14,443,800 trainable parameters; an S-CEReBrO adapter adds
-11,699,820. These are exact `D_e²+D_e` architectural counts, not measured GPU cost.
+`EEGFeatureAdapter` defaults to OFF. It returns the same tensor and has zero
+parameters in that mode, preserving the adapter state of existing OFF checkpoints.
+ON requires Phase D opt-in. Its residual branch is LayerNorm → Linear down →
+GELU → Dropout → Linear up, with a zero-initialized final weight and bias.
+The branch uses `eeg.feature_adapter.hidden_dim` (128) and `dropout` (0.1).
+Input padding is sanitized before the branch, and padded outputs are zeroed
+after residual addition. New modules run in float32 on the LLM device and
+consume cached features from frozen EEG encoders.
+
+| Encoder | Previous linear ON | Bottleneck ON (128) | OFF |
+|---|---:|---:|---:|
+| CBraMod | 14,443,800 | 984,328 | 0 |
+| S-CEReBrO | 11,699,820 | 885,908 | 0 |
+
+ON counts are `(2h + 3)D_e + h`. The adapter logs its trainable parameter count
+at INFO level. M2/M3 checkpoints from the previous full linear ON adapter
+require the previous code to load. Checkpoint loading rejects the legacy
+parameter keys before copying any tensors.
 
 ## D2: LLM modes and clinical/encoder inputs
 
