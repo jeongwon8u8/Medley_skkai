@@ -289,6 +289,21 @@ def test_guards_before_adapter_model_and_plan_mutation(adapter_files,tmp_path,ti
     with pytest.raises(RunnerError,match="changed"): execute_plan([plan],adapter_factory=forbidden,backbone_factory=forbidden)
 
 
+def test_module_cli_execute_validates_plan_before_model_readiness(tmp_path):
+    app = Path(__file__).resolve().parents[1]
+    output = tmp_path / "unused"
+    result = subprocess.run(
+        [sys.executable, "-m", "multimodal.experiment_runner",
+         "--config", str(CONFIG_DIR / "fusion_b.json"), "--model", "M1",
+         "--seed", "0", "--fold", "1", "--execute", "--output-dir", str(output),
+         "--set", "llm.model_id=null"],
+        cwd=app, capture_output=True, text=True,
+    )
+    assert result.returncode == 2
+    assert "Runner error [model_id]" in result.stderr, result.stderr
+    assert not output.exists()
+
+
 def test_execution_missing_model_id_fails_actionably_without_run_files(tmp_path,capsys):
     with pytest.raises(SystemExit): main(["--config",str(CONFIG_DIR / "fusion_b.json"),"--model","M1",
         "--seed","0","--fold","1","--execute","--output-dir",str(tmp_path / "unused")])
@@ -375,3 +390,91 @@ def test_exception_after_atomic_completion_preserves_published_run(adapter_files
     assert inspect_completed(root)["status"]=="completed"
     reused=execute_plan(plans,existing="resume",adapter_factory=lambda cfg:adapter,backbone_factory=tiny_factory)[0]
     assert reused.reused
+
+
+@pytest.mark.parametrize("model", ["M1", "M2", "M3"])
+def test_resume_reproduces_uninterrupted_training(model, adapter_files, tmp_path, tiny_factory, monkeypatch):
+    import random
+    import numpy as np
+    import torch
+    from multimodal import training_control
+    from multimodal.runner_execution import execute_plan
+    from multimodal.model_registry import RunnerError
+    from multimodal.run_state import read_json
+
+    cfg, adapter, _ = execution_inputs(adapter_files, tmp_path, model, mode="lora")
+    cfg.settings["llm"]["lora_dropout"] = .15
+    cfg.settings["training"]["max_epochs"] = 3
+    cfg.settings["training"]["early_stopping_patience"] = 3
+    factory = lambda _: adapter
+    originals = training_control.train_epoch_with_validation
+    rng = []
+
+    def record(runtime, *loaders):
+        rng.append((random.random(), np.random.random(), torch.rand(()).item()))
+        return originals(runtime, *loaders)
+
+    monkeypatch.setattr(training_control, "train_epoch_with_validation", record)
+    options = {"adapter_factory": factory, "backbone_factory": tiny_factory}
+    full = plan_experiments(cfg, models=[model], seeds=[0], folds=[1], output_dir=tmp_path / "full")
+    partial = plan_experiments(cfg, models=[model], seeds=[0], folds=[1], output_dir=tmp_path / "partial")
+    uninterrupted = execute_plan(full, **options)[0]
+    expected_rng, rng[:] = rng[:], []
+
+    def interrupt(runtime, *loaders):
+        if runtime.trainer.epochs_completed == 1:
+            raise KeyboardInterrupt
+        return record(runtime, *loaders)
+
+    monkeypatch.setattr(training_control, "train_epoch_with_validation", interrupt)
+    with pytest.raises(KeyboardInterrupt):
+        execute_plan(partial, **options)
+    changed = copy.deepcopy(cfg)
+    changed.settings["training"]["max_epochs"] += 1
+    invalid = plan_experiments(changed, models=[model], seeds=[0], folds=[1], output_dir=tmp_path / "partial")
+    with pytest.raises(RunnerError, match="No run matches"):
+        execute_plan(invalid, existing="continue", **options)
+    monkeypatch.setattr(training_control, "train_epoch_with_validation", record)
+    resumed = execute_plan(partial, existing="continue", **options)[0]
+    assert rng == expected_rng
+    assert resumed.metrics == uninterrupted.metrics
+    for filename in ("history.json", "predictions.csv.gz"):
+        paths = [run.directory / run.completion["attempt"] / filename for run in (uninterrupted, resumed)]
+        assert paths[0].read_bytes() == paths[1].read_bytes()
+    assert read_json(resumed.directory / resumed.completion["attempt"] / "selection.json")["restoration"]
+    assert execute_plan(partial, existing="continue", **options)[0].reused
+
+
+def test_extend_early_stopped_execution_in_separate_namespace(adapter_files, tmp_path, tiny_factory, monkeypatch):
+    from multimodal import training_control
+    from multimodal.runner_execution import execute_plan
+    from multimodal.run_state import read_json
+
+    cfg, adapter, _ = execution_inputs(adapter_files, tmp_path, "M2", mode="lora")
+    cfg.settings["training"].update(max_epochs=4, early_stopping_patience=1)
+    old_root = tmp_path / "old"
+    old = plan_experiments(cfg, models=["M2"], seeds=[0], folds=[1], output_dir=old_root)
+    original = training_control.train_epoch_with_validation
+    epochs = []
+
+    def controlled(runtime, *loaders):
+        epoch = runtime.trainer.epochs_completed + 1
+        epochs.append(epoch)
+        row = original(runtime, *loaders)
+        row["validation"]["MAE"] = {1: 4., 2: 5., 3: 2., 4: 1.}[epoch]
+        return row
+
+    monkeypatch.setattr(training_control, "train_epoch_with_validation", controlled)
+    options = {"adapter_factory": lambda _: adapter, "backbone_factory": tiny_factory}
+    first = execute_plan(old, **options)[0]
+    assert epochs == [1, 2]
+    before = (first.directory / "completed.json").read_bytes()
+    cfg.settings["training"]["early_stopping_patience"] = 4
+    extended = plan_experiments(cfg, models=["M2"], seeds=[0], folds=[1], output_dir=tmp_path / "extended")
+    result = execute_plan(extended, existing="auto", continue_from=old_root, **options)[0]
+    attempt = result.directory / result.completion["attempt"]
+    assert epochs == [1, 2, 3, 4]
+    assert read_json(attempt / "selection.json")["best_epoch"] == 4
+    assert len(read_json(attempt / "history.json")) == 4
+    assert (first.directory / "completed.json").read_bytes() == before
+    assert execute_plan(extended, existing="auto", continue_from=old_root, **options)[0].reused

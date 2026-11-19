@@ -10,32 +10,12 @@ if __package__ and __package__.startswith("medley_pd."):
 
 import argparse
 import copy
-from dataclasses import dataclass, field
 import json
 
 from .config import load_multimodal_config
+from .experiment_plan import PlannedRun
 from .experiment_protocol import ReadOnlyOuterSplits, fingerprint
 from .model_registry import RunnerError, model_config, registration
-
-
-@dataclass(frozen=True)
-class PlannedRun:
-    model: str
-    seed: int
-    fold: int
-    config: object = field(repr=False)
-    plan_id: str
-    outer_sha256: str | None
-    output_root: str
-    prerequisites: tuple[str, ...]
-
-    def summary(self):
-        return {"model": self.model, "seed": self.seed, "fold": self.fold, "plan_id": self.plan_id,
-                "config_fingerprint": fingerprint(self.config.to_dict()), "outer_sha256": self.outer_sha256,
-                "output": str(Path(self.output_root) / "<C1-run-id>" / "executions" / "<execution-id>"),
-                "status": "planned_not_executed", "cohort_cache_identity": "unverified_no_patient_or_cache_reads",
-                "llm": {k: self.config.settings["llm"][k] for k in ("model_id", "revision", "tuning")},
-                "prerequisites": list(self.prerequisites)}
 
 
 def plan_experiments(config, *, models=None, seeds=None, folds=None, output_dir=None):
@@ -104,8 +84,13 @@ def main(argv=None):
     parser.add_argument("--ack-grid", action="store_true", help="Explicitly acknowledge a broader selected grid")
     parser.add_argument("--max-runs", type=int, default=1)
     parser.add_argument("--output-dir")
+    parser.add_argument("--continue-from", help="Read compatible epoch state from a previous run root")
+    parser.add_argument("--allow-fresh", action="store_true")
+    parser.add_argument("--result-file", help="Write execution metadata to a new JSON file after success")
     existing = parser.add_mutually_exclusive_group()
     existing.add_argument("--resume-completed", action="store_true")
+    existing.add_argument("--resume", action="store_true", help="Continue from the last saved epoch")
+    existing.add_argument("--resume-or-start", action="store_true", help="Reuse, resume, or start a matching execution")
     existing.add_argument("--restart-incomplete", action="store_true")
     existing.add_argument("--fail-on-existing", action="store_true")
     parser.add_argument("--inspect-completed", metavar="EXECUTION_DIRECTORY")
@@ -127,9 +112,16 @@ def main(argv=None):
                           "execution_enabled": args.execute, "runs": [p.summary() for p in plans]}, sort_keys=True, indent=2))
         if args.execute:
             from .runner_execution import execute_plan
-            policy = "resume" if args.resume_completed else "restart" if args.restart_incomplete else "fail"
-            results = execute_plan(plans, max_runs=args.max_runs, existing=policy)
-            print(json.dumps([r.public_metadata() for r in results], sort_keys=True, indent=2))
+            policy = ("auto" if args.resume_or_start else "continue" if args.resume else "resume" if args.resume_completed
+                      else "restart" if args.restart_incomplete else "fail")
+            continuation = ({"continue_from": args.continue_from, "allow_fresh": args.allow_fresh}
+                            if args.continue_from else {})
+            results = execute_plan(plans, max_runs=args.max_runs, existing=policy, **continuation)
+            payload = [result.public_metadata() for result in results]
+            if args.result_file:
+                from .run_state import write_json
+                write_json(Path(args.result_file), payload, exclusive=True)
+            print(json.dumps(payload, sort_keys=True, indent=2))
     except (ValueError, OSError, ImportError, RuntimeError) as exc:
         code = exc.code if isinstance(exc, RunnerError) else "configuration_or_execution"
         message = str(exc) if isinstance(exc, RunnerError) else "Invalid configuration or source inputs; inspect documented preflight"

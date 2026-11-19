@@ -57,7 +57,7 @@ def verify_restoration(runtime, checkpoint, *, best_epoch):
     return metadata
 
 
-def train_select_restore(runtime, train_loader, validation_loader, directory):
+def train_select_restore(runtime, train_loader, validation_loader, directory, *, journal=None, snapshot=None, source=None):
     """Only validation drives selection. Test is intentionally absent from this API."""
     from pathlib import Path
     settings = runtime.trainer.config.settings
@@ -65,8 +65,25 @@ def train_select_restore(runtime, train_loader, validation_loader, directory):
                              min_delta=settings["runner"]["min_delta"])
     history, best_checkpoint = [], None
     max_epochs = settings["training"]["max_epochs"]
+    stop = False
+    if snapshot is not None:
+        history, saved_best = journal.restore(snapshot, source=source)
+        for epoch, row in enumerate(history, 1):
+            if stop:
+                raise RunnerError("resume_state", "Saved history extends beyond early stopping")
+            improved, stop = stopping.observe(row["validation"]["MAE"])
+            if (row["epoch"], row["improved"], row["bad_epochs"]) != (epoch, improved, stopping.bad_epochs):
+                raise RunnerError("resume_state", "Saved history differs from validation selection")
+        if stopping.best_epoch != saved_best or len(history) > max_epochs:
+            raise RunnerError("resume_state", "Saved history differs from the configured epoch budget")
+        best_checkpoint = Path(directory) / "checkpoints" / f"epoch-{saved_best:04d}"
+        if source is not None:
+            journal.save(history, saved_best)
     with progress_bar("Epochs", total=max_epochs, unit="epoch") as bar:
-        for epoch in range(1, max_epochs + 1):
+        bar.update(len(history))
+        for epoch in range(len(history) + 1, max_epochs + 1):
+            if stop:
+                break
             bar.set_description_str(f"Epochs ({epoch}/{max_epochs})")
             record = train_epoch_with_validation(runtime, train_loader, validation_loader)
             improved, stop = stopping.observe(record["validation"]["MAE"])
@@ -74,6 +91,8 @@ def train_select_restore(runtime, train_loader, validation_loader, directory):
             if improved:
                 best_checkpoint = Path(directory) / "checkpoints" / f"epoch-{epoch:04d}"
                 runtime.save(best_checkpoint)
+            if journal is not None:
+                journal.save(history, stopping.best_epoch)
             if not bar.disable:
                 rates = "/".join(f"{group['lr']:.3g}" for group in runtime.trainer.optimizer.param_groups)
                 bar.set_postfix(train_loss=f"{record['training']['huber']:.4f}", lr=rates,

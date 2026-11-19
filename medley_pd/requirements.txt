@@ -1,6 +1,7 @@
 einops
 huggingface_hub
 mne
+matplotlib>=3.8
 numpy
 openneuro-py
 pandas

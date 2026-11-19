@@ -53,7 +53,7 @@ def _assert_inputs(protocol, expected):
         raise RunnerError("inputs_changed", "Cohort/targets/cache/clinical inputs changed during execution")
 
 
-def _execute_one(plan, *, existing, adapter_factory, backbone_factory):
+def _execute_one(plan, *, existing, adapter_factory, backbone_factory, continue_from=None, allow_fresh=False):
     from .experiment_runner import plan_experiments
     # Reject mutable/tampered plan fields, changed source, or changed working-directory semantics.
     expected = plan_experiments(plan.config, models=[plan.model], seeds=[plan.seed], folds=[plan.fold])[0]
@@ -81,7 +81,7 @@ def _execute_one(plan, *, existing, adapter_factory, backbone_factory):
                                   baseline_identifier=baseline_model if plan.model == "M0" else None)
         if manifest.to_dict()["identity"]["cohort_fingerprint"] != prepared.cohort.cohort_fingerprint:
             raise RunnerError("inputs_changed", "Protocol inputs changed between preparation and manifest capture")
-    store = RunStore(manifest, baseline_sha256=baseline_sha)
+    store = RunStore(manifest, baseline_sha256=baseline_sha, require_existing=existing == "continue")
     with store.claim(existing=existing) as cached:
         if cached is not None:
             import pandas as pd
@@ -111,6 +111,26 @@ def _execute_one(plan, *, existing, adapter_factory, backbone_factory):
             write_json(store.attempt / "baseline_audit.json", audit, exclusive=True)
             prediction_model, status = baseline_model, "imported"
         else:
+            source, snapshot = None, store.snapshot
+            if continue_from is not None and snapshot is None:
+                from .training_resume import find_continuation
+                # Source revisions create a new manifest ID. Retain any newer
+                # progress already saved in the destination by an earlier revision.
+                local_candidate = find_continuation(plan.output_root, manifest,
+                                                    exclude_execution=store.execution_id)
+                original_candidate = find_continuation(continue_from, manifest)
+                candidate = max(
+                    (entry for entry in (local_candidate, original_candidate) if entry is not None),
+                    key=lambda entry: int(entry[0].name.split("-")[1]), default=None,
+                )
+                if candidate is None and not allow_fresh:
+                    raise RunnerError("resume_source", "No compatible epoch state; use --allow-fresh to train from epoch 1")
+                if candidate is not None:
+                    snapshot, source_id, source_config = candidate
+                    source = source_id, source_config
+                    write_json(store.attempt / "continuation.json", {
+                        "source_execution_id": source_id, "snapshot_sha256": file_hash(snapshot),
+                    }, exclusive=True)
             from .clinical_trainer import seed_training
             seed_training(derive_seed(plan.seed, plan.fold,
                 purpose=f"training:{config.settings['clinical_regression']['random_seed']}"))
@@ -119,7 +139,12 @@ def _execute_one(plan, *, existing, adapter_factory, backbone_factory):
             with progress_bar("Data loader setup", total=None, unit="stage", leave=False):
                 train, validation, test = _loaders(adapter, prepared, config, seed=plan.seed, fold=plan.fold)
             write_json(store.attempt / "runtime_config.json", runtime.trainer.config.to_dict(), exclusive=True)
-            outcome = train_select_restore(runtime, train, validation, store.attempt)
+            from .training_resume import EpochJournal
+            journal = EpochJournal(runtime, train, store.attempt, store.execution_id,
+                                   live_metadata={"model": plan.model, "seed": plan.seed, "fold": plan.fold,
+                                                  "execution_id": store.execution_id})
+            outcome = train_select_restore(runtime, train, validation, store.attempt,
+                                           journal=journal, snapshot=snapshot, source=source)
             write_json(store.attempt / "history.json", outcome["history"], exclusive=True)
             write_json(store.attempt / "selection.json", {"execution_id": store.execution_id,
                 "c1_run_id": manifest.run_id, "model": plan.model, "seed": plan.seed, "fold": plan.fold,
@@ -128,6 +153,7 @@ def _execute_one(plan, *, existing, adapter_factory, backbone_factory):
                 "restoration": "verified_exact_trainable_weights", "test_used_for_selection": False}, exclusive=True)
             _assert_inputs(protocol, prepared.cohort)
             # This is the only outer-test evaluate invocation in the training lifecycle.
+            runtime.trainer.test_case_path = store.attempt / "per_case.csv"
             result = runtime.trainer.evaluate(test, role="test")
             validate_predictions(result.predictions, prepared.cohort, prepared.outer, model=runtime.prediction_model,
                                  target_atol=config.settings["protocol"]["target_atol"])
@@ -142,7 +168,8 @@ def _execute_one(plan, *, existing, adapter_factory, backbone_factory):
         return ExecutionResult(store.root, completion, metrics, False)
 
 
-def execute_plan(plans, *, max_runs=1, existing="fail", adapter_factory=None, backbone_factory=None):
+def execute_plan(plans, *, max_runs=1, existing="fail", adapter_factory=None, backbone_factory=None,
+                 continue_from=None, allow_fresh=False):
     """Only explicit calls execute. Bounds checked before adapter or model construction.
 
     Factory injection is a deliberate test/embedding seam, not a CLI training-mode
@@ -150,14 +177,21 @@ def execute_plan(plans, *, max_runs=1, existing="fail", adapter_factory=None, ba
     """
     from .experiment_runner import execution_guard
     execution_guard(plans, max_runs=max_runs)
-    if existing not in ("fail", "resume", "restart"):
-        raise RunnerError("existing_policy", "Existing-run policy must be fail, resume or restart")
+    if existing not in ("fail", "resume", "restart", "continue", "auto"):
+        raise RunnerError("existing_policy", "Invalid existing-run policy")
+    if continue_from is not None and any(
+        p.model == "M0" or Path(continue_from).resolve() == Path(p.output_root)
+        or p.config.settings["training"]["early_stopping_patience"] < p.config.settings["training"]["max_epochs"]
+        for p in plans
+    ):
+        raise RunnerError("resume_source", "Continuation requires a separate output root and a full epoch budget")
     results = []
     with progress_bar("Experiments", total=len(plans), unit="run") as bar:
         with nullcontext() if bar.disable else logging_redirect_tqdm():
             for plan in plans:
                 bar.set_postfix_str(f"model={plan.model} seed={plan.seed} fold={plan.fold}")
                 results.append(_execute_one(plan, existing=existing, adapter_factory=adapter_factory,
-                                            backbone_factory=backbone_factory))
+                                            backbone_factory=backbone_factory, continue_from=continue_from,
+                                            allow_fresh=allow_fresh))
                 bar.update()
     return tuple(results)

@@ -10,6 +10,32 @@ from multimodal.run_state import RunStore,write_json,read_json,inspect_completed
 from multimodal.model_registry import RunnerError
 
 
+@pytest.mark.parametrize("directory,allowed", [
+    ("outputs", True),
+    ("medley_pd/outputs", True),
+    ("medley_pd/checkpoints", True),
+    ("medley_pd/configs", False),
+])
+def test_repository_namespace_uses_ignored_private_output_roots(directory, allowed):
+    from types import SimpleNamespace
+    from multimodal.clinical_checkpoint import _private_path
+    from multimodal.run_state import REPOSITORY, _validate_namespace
+
+    namespace = REPOSITORY / directory / "test-run-namespace"
+    manifest = SimpleNamespace(
+        _protected_roots=(), to_dict=lambda: {"output_namespace": str(namespace)},
+    )
+    if allowed:
+        assert _validate_namespace(manifest) == namespace
+        assert _private_path(namespace / 'checkpoints' / 'epoch-0001') == namespace / 'checkpoints' / 'epoch-0001'
+        assert _private_path(namespace / 'predictions.csv.gz') == namespace / 'predictions.csv.gz'
+    else:
+        with pytest.raises(RunnerError, match="ignored outputs"):
+            _validate_namespace(manifest)
+        with pytest.raises(ValueError, match="ignored outputs"):
+            _private_path(namespace / 'predictions.csv.gz')
+
+
 def test_atomic_exclusive_write_never_overwrites(tmp_path):
     path=tmp_path / "completion.json"
     write_json(path,{"first":1},exclusive=True)
@@ -85,3 +111,18 @@ def test_bootstrap_interruption_can_publish_missing_manifest_without_overwrite(a
     assert orphan.read_text()=="interrupted private metadata"
     with store.claim(): pass
     assert not (store.root / "completed.json").exists()
+
+
+def test_auto_policy_starts_then_claims_latest_epoch(adapter_files, tmp_path):
+    cfg, adapter, protocol = execution_inputs(adapter_files, tmp_path)
+    store = RunStore(build_manifest(protocol, seed=0, fold=1))
+    with store.claim(existing="auto"):
+        assert store.snapshot is None
+        first = store.attempt
+        directory = first / "resume"
+        directory.mkdir()
+        snapshot = directory / ("epoch-0001-" + "a" * 64 + ".pt")
+        snapshot.touch()
+    with store.claim(existing="auto"):
+        assert store.snapshot == snapshot
+        assert store.attempt != first

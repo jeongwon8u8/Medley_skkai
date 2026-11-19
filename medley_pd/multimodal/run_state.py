@@ -1,6 +1,6 @@
 """Private single-owner attempts and atomic, integrity-checked run completion.
 
-No optimizer/RNG persistence and no mid-epoch resume. Failed attempts are retained.
+Failed attempts are retained. Training can resume from a published epoch boundary.
 """
 from __future__ import annotations
 
@@ -10,11 +10,11 @@ import hashlib
 import json
 import math
 import os
-import subprocess
 from pathlib import Path
 from numbers import Integral, Real
 import uuid
 
+from .artifact_paths import is_ignored_private_artifact
 from .config import _pairs
 from .experiment_protocol import canonical_json, fingerprint
 from .experiment_manifest import REPOSITORY, read_manifest
@@ -226,17 +226,17 @@ def _validate_namespace(manifest):
     if any(path == root or root in path.parents for root in manifest._protected_roots):
         raise RunnerError("run_path", "Run namespace must stay outside data/cache/split sources")
     if path == REPOSITORY or REPOSITORY in path.parents:
-        relative = path.relative_to(REPOSITORY)
-        if (not relative.parts or relative.parts[0] not in ("outputs", "checkpoints")
-                or subprocess.run(["git", "check-ignore", "--quiet", str(path / "manifest.json")], cwd=REPOSITORY).returncode != 0):
+        if not is_ignored_private_artifact(path / "manifest.json"):
             raise RunnerError("run_path", "In-repository runner outputs require ignored outputs/ or checkpoints/")
     return path
 
 
 class RunStore:
-    def __init__(self, manifest, *, baseline_sha256=None):
+    def __init__(self, manifest, *, baseline_sha256=None, require_existing=False):
         self.manifest = manifest
         namespace = _validate_namespace(manifest)
+        if require_existing and not (namespace / "manifest.json").is_file():
+            raise RunnerError("resume_unavailable", "No run matches the current configuration, data and code identity")
         # Atomically publish the C1 schema under a short single-owner bootstrap
         # lock. A crash before publication leaves no false/partial manifest.
         namespace.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -261,17 +261,20 @@ class RunStore:
         self.root = namespace / "executions" / self.execution_id
         self.attempt = None
         self._owned = False
+        self.snapshot = None
 
     @contextmanager
     def claim(self, *, existing="fail"):
-        if existing not in ("fail", "resume", "restart"):
-            raise RunnerError("existing_policy", "Existing-run policy must be fail, resume or restart")
+        if existing not in ("fail", "resume", "restart", "continue", "auto"):
+            raise RunnerError("existing_policy", "Invalid existing-run policy")
         if self._owned:
             raise RunnerError("run_busy", "This execution already owns an active attempt")
         _validate_namespace(self.manifest)
         if self.root != self.root.resolve() or (self.root / "attempts").is_symlink():
             raise RunnerError("run_path", "Execution/attempt paths must not redirect through symbolic links")
         self.root.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if existing == "continue" and not self.root.is_dir():
+            raise RunnerError("resume_unavailable", "No matching execution to resume")
         try:
             self.root.mkdir(mode=0o700)
             existed = False
@@ -286,12 +289,21 @@ class RunStore:
             except BlockingIOError:
                 raise RunnerError("run_busy", "Another process owns this execution") from None
             self._owned = True
+            self.snapshot = None
             if (self.root / "completed.json").exists():
-                if existing != "resume":
+                if existing not in ("resume", "continue", "auto"):
                     raise RunnerError("run_exists", "Completed runs cannot be restarted or overwritten")
                 yield validate_completion(self.root, read_json(self.root / "completed.json"), expected_identity=self.identity)
                 return
-            if existed and existing != "restart":
+            if existed and existing in ("continue", "auto"):
+                self.snapshot = max(
+                    (self.root / "attempts").glob("*/resume/epoch-*.pt"),
+                    key=lambda path: (path.parent.parent.stat().st_mtime_ns, int(path.name.split("-")[1])),
+                    default=None,
+                )
+                if self.snapshot is None and existing == "continue":
+                    raise RunnerError("resume_unavailable", "No completed epoch state to resume; explicit restart is available")
+            if existed and existing not in ("restart", "continue", "auto"):
                 raise RunnerError("run_incomplete", "No valid completion marker; use explicit restart-incomplete")
             self.attempt = self.root / "attempts" / uuid.uuid4().hex
             self.attempt.mkdir(parents=True, mode=0o700)

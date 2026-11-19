@@ -143,7 +143,7 @@ class InnerPartition:
                 "test": len(self.test_subjects)}
 
 
-def select_inner_validation(outer, *, fraction=.2):
+def select_inner_validation(outer, *, fraction=.2, policy="sha256_rank_v1", targets=None):
     """Rank outer-train IDs by a seeded SHA-256; choose ceil(N*f), no strata.
 
     Output order preserves the original outer source, selection does not depend
@@ -166,9 +166,27 @@ def select_inner_validation(outer, *, fraction=.2):
     seed = derive_seed(outer.seed, outer.fold)
     ranked = sorted(train, key=lambda sid: (fingerprint({"version": "medley_inner_rank_v1",
                                                          "derived_seed": seed, "subject": sid}), sid))
-    chosen = set(ranked[:n_validation])
+    if policy == "sha256_rank_v1":
+        chosen = set(ranked[:n_validation])
+    elif policy == "sha256_moca_bands_v1":
+        if targets is None or set(targets) != set(train) or any(
+            not math.isfinite(value) or not 0 <= value <= 30 for value in targets.values()
+        ):
+            raise ProtocolError("inner_strata", "MoCA stratification requires only the complete outer-train targets")
+        bands = [[], [], []]
+        for subject in ranked:
+            score = targets[subject]
+            bands[0 if score <= 24 else 1 if score < 28 else 2].append(subject)
+        allocation = [n_validation * len(band) // len(train) for band in bands]
+        remainder = n_validation - sum(allocation)
+        order = sorted(range(len(bands)), key=lambda i: (-(n_validation * len(bands[i]) % len(train)), i))
+        for index in order[:remainder]:
+            allocation[index] += 1
+        chosen = {subject for band, count in zip(bands, allocation) for subject in band[:count]}
+    else:
+        raise ProtocolError("inner_policy", "Unknown inner validation policy")
     return InnerPartition(outer.seed, outer.fold, tuple(s for s in train if s not in chosen),
-                          tuple(s for s in train if s in chosen), test, seed, float(fraction))
+                          tuple(s for s in train if s in chosen), test, seed, float(fraction), policy=policy)
 
 
 class ExperimentProtocol:
@@ -199,7 +217,13 @@ class ExperimentProtocol:
     def prepare(self, *, seed, fold):
         outer = self.get_outer_split(seed=seed, fold=fold)
         cohort = self.validate_cohort()
-        partition = select_inner_validation(outer, fraction=self.config.settings["training"]["validation_fraction"])
+        policy = self.config.settings["protocol"]["inner_policy"]
+        targets = None
+        if policy == "sha256_moca_bands_v1":
+            outer_train = set(outer.train_subjects)
+            targets = {row.subject: row.target for row in cohort.metadata if row.subject in outer_train}
+        partition = select_inner_validation(outer, fraction=self.config.settings["training"]["validation_fraction"],
+                                            policy=policy, targets=targets)
         return PreparedProtocol(outer, partition, cohort, self.outer.sha256, self.outer.assignment_fingerprint)
 
     def compare_cohorts(self, snapshots):

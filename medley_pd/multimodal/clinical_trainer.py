@@ -90,6 +90,7 @@ class ClinicalTrainer:
             raise ValueError("BF16 autocast requires supported CUDA; choose none for CPU synthetic runs")
         self.epochs_completed = 0
         self.optimizer_steps = 0
+        self.test_case_path = None
 
     def _model_device(self):
         return self.model.head.weight.device
@@ -206,8 +207,13 @@ class ClinicalTrainer:
         was_training = self.model.training
         self.model.eval()
         rows, seen = [], set()
+        case_path = self.test_case_path if role == "test" else None
         with progress_bar(role.capitalize(), total=batch_count(loader), unit="batch") as bar:
             try:
+                if case_path is not None:
+                    from .live_artifacts import write_cases
+
+                    write_cases(case_path, rows)
                 with torch.no_grad():
                     for batch in loader:
                         ids, tokens, targets = self._batch(batch, expected, seen)
@@ -220,6 +226,8 @@ class ClinicalTrainer:
                             rows.append({"seed": self.split.seed, "fold": self.split.fold, "subject": sid,
                                          "subgroup": subgroup, "model": self._model_identifier(),
                                          "y": y, "yhat": p, "target": y})
+                        if case_path is not None:
+                            write_cases(case_path, rows)
                         bar.update()
             finally:
                 self.model.train(was_training)

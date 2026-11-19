@@ -133,7 +133,7 @@ def build_manifest(protocol, *, seed, fold, model=None, baseline_identifier=None
         "extraction_history": "not_verified", "baseline_training_provenance": "not_verified" if model == "M0" else "not_applicable",
         "inner_policy": {"method": partition.policy, "fraction": partition.validation_fraction,
                          "rounding": partition.rounding, "derived_seed": partition.derived_seed,
-                         "target_stratification": False,
+                         "target_stratification": partition.policy == "sha256_moca_bands_v1",
                          "baseline_scope": "proposed_only_not_historical_baseline_verification" if model == "M0" else "planned_training"},
         "eeg": {"encoder": config.settings["eeg"]["encoder"], "feature_dim": config.settings["eeg"]["feature_dim"]},
         "clinical_set": config.settings["clinical_set"],
@@ -193,13 +193,14 @@ def validate_manifest(payload):
         expected_inner = {
             "method": settings["protocol"]["inner_policy"], "fraction": settings["training"]["validation_fraction"],
             "rounding": "decimal_ceil_no_clamping", "derived_seed": derive_seed(identity["seed"], identity["fold"]),
-            "target_stratification": False,
+            "target_stratification": settings["protocol"]["inner_policy"] == "sha256_moca_bands_v1",
             "baseline_scope": "proposed_only_not_historical_baseline_verification" if model == "M0" else "planned_training",
         }
         reconstructed = SubjectSplit(identity["seed"], identity["fold"], partitions[0] + partitions[1], partitions[2])
         expected_partition = select_inner_validation(reconstructed, fraction=settings["training"]["validation_fraction"])
         if (identity["inner_policy"] != expected_inner
-                or set(expected_partition.validation_subjects) != set(partitions[1])
+                or (len(expected_partition.validation_subjects) != len(partitions[1]) if expected_inner["target_stratification"]
+                    else set(expected_partition.validation_subjects) != set(partitions[1]))
                 or identity["source_subject_fingerprint"] != fingerprint(sorted(s for part in partitions for s in part))
                 or identity["clinical_set"] != settings["clinical_set"]
                 or identity["eeg"] != {k: settings["eeg"][k] for k in ("encoder", "feature_dim")}

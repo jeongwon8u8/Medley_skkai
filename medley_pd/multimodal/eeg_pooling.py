@@ -193,6 +193,20 @@ class MaskedReductionPooling(nn.Module):
 
 def build_eeg_pooling(config):
     validate_config(config.settings)
-    eeg=config.settings["eeg"];options=eeg["pooling"]
-    if options["type"]=="attention": return LearnedQueryAttentionPooling.from_config(config)
-    return MaskedReductionPooling(eeg["feature_dim"],hidden_dim=options["hidden_dim"],kind=options["type"])
+    eeg = config.settings["eeg"]
+    options = eeg["pooling"]
+    if options["type"] == "attention":
+        pooling = LearnedQueryAttentionPooling.from_config(config)
+    else:
+        pooling = MaskedReductionPooling(eeg["feature_dim"], hidden_dim=options["hidden_dim"],
+                                        kind=options["type"])
+    if options.get("fixed_projection", False):
+        # Regenerate identically for both fusion models without changing global RNG.
+        projection = pooling.input_projection
+        generator = torch.Generator(device="cpu").manual_seed(eeg["seed"])
+        width = projection.in_features
+        weight = torch.empty(projection.weight.shape, dtype=torch.float32, device="cpu").uniform_(-width ** -.5, width ** -.5, generator=generator)
+        for name, value in (("weight", weight), ("bias", torch.zeros(projection.out_features, dtype=torch.float32, device="cpu"))):
+            delattr(projection, name)
+            projection.register_buffer(name, value, persistent=False)
+    return pooling

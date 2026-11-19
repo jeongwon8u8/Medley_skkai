@@ -74,7 +74,7 @@ _SCHEMA: JsonDict = {
     "eeg": {
         **dict.fromkeys(("encoder", "input_type", "feature_dim", "seed")),
         "feature_adapter": dict.fromkeys(("enabled", "hidden_dim", "dropout")),
-        "pooling": dict.fromkeys(("type", "num_queries", "hidden_dim", "num_heads")),
+        "pooling": dict.fromkeys(("type", "num_queries", "hidden_dim", "num_heads", "fixed_projection")),
         "projector": dict.fromkeys(("type", "layer_norm", "output_dim")),
     },
     "fusion": dict.fromkeys(("type", "token_position", "numeric_skip", "uncertainty", "fusion_dim", "dropout")),
@@ -191,12 +191,16 @@ def _shape(value: Any, template: Any, path: str = "") -> None:
         raise ConfigError(f"{path or 'configuration'} must be an object")
     unknown = value.keys() - template.keys()
     missing = template.keys() - value.keys()
+    # Keep previous config and checkpoint hashes identical when the option is absent.
+    if path == "eeg.pooling":
+        missing -= {"fixed_projection"}
     if unknown:
         raise ConfigError(f"Unknown configuration key: {path + '.' if path else ''}{sorted(unknown)[0]}")
     if missing:
         raise ConfigError(f"Missing required setting: {path + '.' if path else ''}{sorted(missing)[0]}")
     for key in template:
-        _shape(value[key], template[key], f"{path}.{key}".lstrip("."))
+        if key in value:
+            _shape(value[key], template[key], f"{path}.{key}".lstrip("."))
 
 
 def _get(config: JsonDict, path: str) -> Any:
@@ -266,7 +270,7 @@ def validate_config(settings: JsonDict) -> None:
     for key in FUSION_A_DEFAULTS:
         if key.startswith("lr_") and settings["fusion_a"][key] is not None:
             _number(settings, f"fusion_a.{key}")
-    _choice(settings, "protocol.inner_policy", ("sha256_rank_v1",))
+    _choice(settings, "protocol.inner_policy", ("sha256_rank_v1", "sha256_moca_bands_v1"))
     _choice(settings, "protocol.cohort_policy", ("exact_source",))
     _choice(settings, "protocol.strict_comparability", (True, False))
     _number(settings, "protocol.target_atol", strict=False, maximum=.001)
@@ -304,6 +308,9 @@ def validate_config(settings: JsonDict) -> None:
             or len(set(allowed)) != len(allowed)):
         raise ConfigError("analysis.allowed_differences requires explicit research-setting paths; cohort/target overrides are forbidden")
     _choice(settings, "ablation.enabled", (False, True))
+    fixed_projection = settings["eeg"]["pooling"].get("fixed_projection", False)
+    if type(fixed_projection) is not bool or (fixed_projection and not settings["ablation"]["enabled"]):
+        raise ConfigError("Fixed EEG projection requires an explicit ablation")
     _choice(settings, "ablation.numeric_scaling", ("none",))
     _number(settings, "ablation.numeric_projection_dim", integer=True)
     if settings["eeg"]["pooling"]["type"] != "attention" and settings["eeg"]["pooling"]["num_queries"] != 1:

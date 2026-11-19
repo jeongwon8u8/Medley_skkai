@@ -14,20 +14,20 @@ import numpy as np
 from safetensors.torch import load_file, save_file
 import torch
 
+from .live_artifacts import PREDICTION_COLUMNS
+from .artifact_paths import REPOSITORY, is_ignored_private_artifact
 from .clinical_regressor import ClinicalLLMRegressor
 from .clinical_trainer import ClinicalEvaluation
 from .config import inference_config_digest as _config_digest
 
 
-REPOSITORY = Path(__file__).resolve().parents[2]
-PREDICTION_COLUMNS = ("seed", "fold", "subject", "subgroup", "model", "y", "yhat", "target")
+
 
 
 def _private_path(path) -> Path:
     path = Path(path).expanduser().resolve()
     if path == REPOSITORY or REPOSITORY in path.parents:
-        relative = path.relative_to(REPOSITORY)
-        if not relative.parts or relative.parts[0] not in ("outputs", "checkpoints"):
+        if not is_ignored_private_artifact(path):
             raise ValueError("In-repository artifacts must use ignored outputs/ or checkpoints/")
     return path
 
