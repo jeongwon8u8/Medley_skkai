@@ -137,6 +137,19 @@ def test_adapter_off_is_exact_identity_and_on_is_explicitly_deferred():
             factory(cfg)
 
 
+@pytest.mark.parametrize("encoder,count", [("cbramod", 984328), ("scerebro", 885908)])
+def test_adapter_from_config_bottleneck_parameter_counts(encoder, count, caplog):
+    cfg = config(encoder, "ablation.enabled=true", "eeg.feature_adapter.enabled=true")
+    with caplog.at_level("INFO", logger="multimodal.eeg_pooling"):
+        adapter = EEGFeatureAdapter.from_config(cfg)
+    assert sum(p.numel() for p in adapter.parameters() if p.requires_grad) == count
+    assert f"trainable_parameters={count}" in caplog.text
+    cfg.settings["eeg"]["feature_adapter"].update(hidden_dim=12, dropout=0.25)
+    adapter = EEGFeatureAdapter.from_config(cfg)
+    assert adapter.down.out_features == adapter.up.in_features == 12
+    assert adapter.dropout.p == 0.25
+
+
 def test_configured_seed_reproduces_initialization_without_implicit_resets():
     cfg = config("cbramod", "eeg.seed=13", "eeg.pooling.hidden_dim=16")
     seed_eeg_modules(cfg)
