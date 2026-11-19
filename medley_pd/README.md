@@ -144,6 +144,21 @@ bash scripts/test.sh  pd_eeg task=moca_impaired              # 평가도 같은 
 ```
 과제마다 split 파일이 따로 있습니다 (`splits/<dataset>__moca.csv`, `splits/<dataset>__moca_impaired.csv`).
 
+**평가 지표 6가지 돌리기 (MoCA 회귀)**
+
+| 지표 | 명령 | 결과 파일 (`.../<experiment_name>/test/`) |
+|---|---|---|
+| ① MAE ② Spearman ③ R² ④ 짝지은 ΔMAE + 95% CI | `bash scripts/test.sh pd_eeg` | `summary.csv`, `paired.csv` |
+| ⑤ 순열 검정 (정답 섞기, EEG 섞기) | `bash scripts/test.sh pd_eeg permtest.label=true permtest.eeg=true permtest.n=1000` | `permtest_label.csv`, `permtest_eeg.csv` |
+| ⑥ 차트 교체 검사 | `bash scripts/swaptest.sh pd_eeg` | `swaptest.csv` |
+
+- ⑤는 기본으로 첫 seed 하나만 씁니다(`permtest.seeds=[0,1,2]` 로 늘릴 수 있음). 1000회는 오래 걸리므로 `nohup` 권장. 100회로 먼저 확인해도 됩니다.
+- ⑥은 EEG 는 그대로 두고 임상 차트만 **무작위 / 같은 그룹 / 반대 그룹** 환자 것으로 바꿉니다. 그룹은 MoCA < 26 / ≥ 26 (`--cut` 으로 변경). 조건마다 20회 교체(`--draws`).
+  - `shift` = 평균 |교체 후 예측 − 교체 전 예측| (점), `dMAE` = 교체 후 MAE − 교체 전 MAE (점, 95% CI)
+  - 차트를 정당하게 쓰는 모델도 `shift` 는 0 이 아닙니다. **같은 그룹(same)에서는 dMAE 가 0 근처, 반대 그룹(opposite)에서는 dMAE 가 작을수록** 좋은 결합 모델입니다.
+  - 분류 과제(`task=moca_impaired`)에서는 `shift` = 평균 |Δ확률|, `dAUROC`, `NFR`(맞던 판정이 틀리게 바뀐 비율)을 냅니다.
+  - 학습 fold 마다 모델을 다시 학습하므로 `train.sh` 와 같은 데이터·피처가 필요합니다. 교체 전 예측은 `train.sh` 결과와 똑같습니다 (smoke test 에서 확인).
+
 **결과** — `results/<dataset>/<task>/<encoder>/<experiment_name>/`
 - `predictions.csv.gz`, `subjects.csv`, `config_used.yaml` (train)
 - `test/summary.csv`, `paired.csv`, `metrics_per_seed.csv`, `subgroup.csv`, `per_case.csv`, `figures/*.png` (test)
