@@ -54,8 +54,18 @@ def test_d2_adapter_identity_initialization_mask_and_gradients():
     assert off(x) is x and not list(off.parameters())
     torch.testing.assert_close(on(x),x)
     bad=x.detach().clone();bad[~mask]=float('nan')
-    on(bad,eeg_mask=mask).square().sum().backward()
+    bad.requires_grad_()
+    initial = on(bad, eeg_mask=mask)
+    torch.testing.assert_close(initial, x.masked_fill(~mask.unsqueeze(-1), 0.), rtol=0, atol=0)
+    initial.square().sum().backward()
     assert all(p.requires_grad and p.grad is not None and torch.isfinite(p.grad).all() for p in on.parameters())
+    assert torch.count_nonzero(on.up.weight.grad) > 0
+    assert torch.count_nonzero(bad.grad[~mask]) == 0
+    with torch.no_grad():
+        on.up.bias.fill_(1.)
+    updated = on(bad, eeg_mask=mask)
+    torch.testing.assert_close(updated[mask], x[mask] + 1.)
+    assert torch.count_nonzero(updated[~mask]) == 0
     with pytest.raises(ValueError): on(torch.ones(1,2,4))
 
 
