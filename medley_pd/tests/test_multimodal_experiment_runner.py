@@ -69,7 +69,8 @@ def tiny_factory():
     from multimodal.llm_backbone import prepare_llm_backbone
     base=backbone()
     def create(config):
-        return prepare_llm_backbone(config,copy.deepcopy(base.model),copy.deepcopy(base.tokenizer))
+        model = copy.deepcopy(base.model).to(config.settings["llm"]["device"])
+        return prepare_llm_backbone(config, model, copy.deepcopy(base.tokenizer))
     return create
 
 
@@ -105,18 +106,45 @@ def test_c22_one_real_m1_epoch_uses_c1_loaders_and_validation_only(adapter_files
 
 
 @pytest.mark.parametrize("model",["M1","M2","M3"])
-def test_c24_real_model_checkpoint_export_and_one_test_pass(model,adapter_files,tmp_path,tiny_factory,monkeypatch,capsys):
+@pytest.mark.parametrize("tty,disabled,device", [
+    (True, False, "cpu"), (True, True, "cpu"), (False, False, "cpu"), (True, False, "cuda"),
+])
+def test_c24_real_model_checkpoint_export_and_one_test_pass(
+    model, tty, disabled, device, adapter_files, tmp_path, tiny_factory, monkeypatch, capsys,
+):
+    import sys
+    import torch
+
+    if device == "cuda" and not torch.cuda.is_available():
+        pytest.skip("CUDA is unavailable")
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: tty)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    monkeypatch.setenv("TQDM_DISABLE", "1" if disabled else "0")
     from multimodal.runner_execution import execute_plan
     from multimodal.run_state import inspect_completed,read_json
     from multimodal.clinical_trainer import ClinicalTrainer
     calls=[];original=ClinicalTrainer.evaluate
     def record(self,loader,*,role="validation"):
+        assert self.device.type == device
         calls.append(role)
         return original(self,loader,role=role)
     monkeypatch.setattr(ClinicalTrainer,"evaluate",record)
     cfg,adapter,protocol=execution_inputs(adapter_files,tmp_path,model)
+    cfg.settings["llm"]["device"] = device
     plans=plan_experiments(cfg,models=[model],seeds=[0],folds=[1])
     result=execute_plan(plans,adapter_factory=lambda cfg:adapter,backbone_factory=tiny_factory)[0]
+    stderr = capsys.readouterr().err
+    if tty and not disabled:
+        for entry in (
+            "Experiments", f"model={model} seed=0 fold=1", "1/1", "Data preparation",
+            "Model initialization", "Data loader setup", "Epochs", "train_loss=", "lr=",
+            "optimizer_steps=", "Training batches", "3/3", "avg_loss=", "Validation",
+            "loss=", "Test", "MAE=", "RMSE=",
+        ):
+            assert entry in stderr
+    else:
+        for entry in ("Experiments", "Epochs", "Training batches", "Validation:", "Test:"):
+            assert entry not in stderr
     assert result.metrics["n"]==2 and calls.count("test")==1
     assert result.completion["status"]=="completed" and not result.reused
     report=inspect_completed(result.directory)

@@ -1,9 +1,12 @@
 """Bounded C1 -> existing trainer -> validation selection -> one test evaluation."""
 from __future__ import annotations
 
+from contextlib import nullcontext
 from dataclasses import dataclass
 import copy
 from pathlib import Path
+
+from tqdm.contrib.logging import logging_redirect_tqdm
 
 from .experiment_protocol import ExperimentProtocol, derive_seed
 from .experiment_manifest import build_manifest
@@ -11,6 +14,7 @@ from .experiment_cohort import validate_predictions, audit_prediction_file
 from .model_registry import RunnerError, check_readiness, create_runtime
 from .run_state import RunStore, file_hash, read_json, write_json
 from .training_control import train_select_restore
+from .progress import progress_bar
 
 
 @dataclass(frozen=True)
@@ -58,24 +62,25 @@ def _execute_one(plan, *, existing, adapter_factory, backbone_factory):
     config = copy.deepcopy(plan.config)
     if plan.model != "M0" and backbone_factory is None and existing == "fail":
         check_readiness(config)
-    if adapter_factory is None:
-        from .data_adapter import MedleyDataAdapter
-        adapter = MedleyDataAdapter(config)
-    else:
-        adapter = adapter_factory(copy.deepcopy(config))
-    protocol = ExperimentProtocol(config, adapter)
-    prepared = protocol.prepare(seed=plan.seed, fold=plan.fold)
-    baseline_path = config.settings["runner"]["baseline_path"]
-    baseline_model = config.settings["runner"]["baseline_model"]
-    baseline_sha = None
-    if plan.model == "M0":
-        if not baseline_path or not baseline_model:
-            raise RunnerError("baseline_source", "M0 requires runner.baseline_path and runner.baseline_model")
-        baseline_sha = file_hash(baseline_path)
-    manifest = build_manifest(protocol, seed=plan.seed, fold=plan.fold, model=plan.model,
-                              baseline_identifier=baseline_model if plan.model == "M0" else None)
-    if manifest.to_dict()["identity"]["cohort_fingerprint"] != prepared.cohort.cohort_fingerprint:
-        raise RunnerError("inputs_changed", "Protocol inputs changed between preparation and manifest capture")
+    with progress_bar("Data preparation", total=None, unit="stage", leave=False):
+        if adapter_factory is None:
+            from .data_adapter import MedleyDataAdapter
+            adapter = MedleyDataAdapter(config)
+        else:
+            adapter = adapter_factory(copy.deepcopy(config))
+        protocol = ExperimentProtocol(config, adapter)
+        prepared = protocol.prepare(seed=plan.seed, fold=plan.fold)
+        baseline_path = config.settings["runner"]["baseline_path"]
+        baseline_model = config.settings["runner"]["baseline_model"]
+        baseline_sha = None
+        if plan.model == "M0":
+            if not baseline_path or not baseline_model:
+                raise RunnerError("baseline_source", "M0 requires runner.baseline_path and runner.baseline_model")
+            baseline_sha = file_hash(baseline_path)
+        manifest = build_manifest(protocol, seed=plan.seed, fold=plan.fold, model=plan.model,
+                                  baseline_identifier=baseline_model if plan.model == "M0" else None)
+        if manifest.to_dict()["identity"]["cohort_fingerprint"] != prepared.cohort.cohort_fingerprint:
+            raise RunnerError("inputs_changed", "Protocol inputs changed between preparation and manifest capture")
     store = RunStore(manifest, baseline_sha256=baseline_sha)
     with store.claim(existing=existing) as cached:
         if cached is not None:
@@ -109,8 +114,10 @@ def _execute_one(plan, *, existing, adapter_factory, backbone_factory):
             from .clinical_trainer import seed_training
             seed_training(derive_seed(plan.seed, plan.fold,
                 purpose=f"training:{config.settings['clinical_regression']['random_seed']}"))
-            runtime = create_runtime(plan.model, config, prepared, backbone_factory=backbone_factory)
-            train, validation, test = _loaders(adapter, prepared, config, seed=plan.seed, fold=plan.fold)
+            with progress_bar("Model initialization", total=None, unit="stage", leave=False):
+                runtime = create_runtime(plan.model, config, prepared, backbone_factory=backbone_factory)
+            with progress_bar("Data loader setup", total=None, unit="stage", leave=False):
+                train, validation, test = _loaders(adapter, prepared, config, seed=plan.seed, fold=plan.fold)
             write_json(store.attempt / "runtime_config.json", runtime.trainer.config.to_dict(), exclusive=True)
             outcome = train_select_restore(runtime, train, validation, store.attempt)
             write_json(store.attempt / "history.json", outcome["history"], exclusive=True)
@@ -145,5 +152,12 @@ def execute_plan(plans, *, max_runs=1, existing="fail", adapter_factory=None, ba
     execution_guard(plans, max_runs=max_runs)
     if existing not in ("fail", "resume", "restart"):
         raise RunnerError("existing_policy", "Existing-run policy must be fail, resume or restart")
-    return tuple(_execute_one(plan, existing=existing, adapter_factory=adapter_factory,
-                              backbone_factory=backbone_factory) for plan in plans)
+    results = []
+    with progress_bar("Experiments", total=len(plans), unit="run") as bar:
+        with nullcontext() if bar.disable else logging_redirect_tqdm():
+            for plan in plans:
+                bar.set_postfix_str(f"model={plan.model} seed={plan.seed} fold={plan.fold}")
+                results.append(_execute_one(plan, existing=existing, adapter_factory=adapter_factory,
+                                            backbone_factory=backbone_factory))
+                bar.update()
+    return tuple(results)

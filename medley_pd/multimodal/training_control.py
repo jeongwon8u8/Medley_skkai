@@ -5,6 +5,7 @@ import math
 from numbers import Real
 
 from .model_registry import RunnerError
+from .progress import progress_bar
 
 
 def train_epoch_with_validation(runtime, train_loader, validation_loader):
@@ -63,15 +64,24 @@ def train_select_restore(runtime, train_loader, validation_loader, directory):
     stopping = EarlyStopping(patience=settings["training"]["early_stopping_patience"],
                              min_delta=settings["runner"]["min_delta"])
     history, best_checkpoint = [], None
-    for epoch in range(1, settings["training"]["max_epochs"] + 1):
-        record = train_epoch_with_validation(runtime, train_loader, validation_loader)
-        improved, stop = stopping.observe(record["validation"]["MAE"])
-        history.append({"epoch": epoch, **record, "improved": improved, "bad_epochs": stopping.bad_epochs})
-        if improved:
-            best_checkpoint = Path(directory) / "checkpoints" / f"epoch-{epoch:04d}"
-            runtime.save(best_checkpoint)
-        if stop:
-            break
+    max_epochs = settings["training"]["max_epochs"]
+    with progress_bar("Epochs", total=max_epochs, unit="epoch") as bar:
+        for epoch in range(1, max_epochs + 1):
+            bar.set_description_str(f"Epochs ({epoch}/{max_epochs})")
+            record = train_epoch_with_validation(runtime, train_loader, validation_loader)
+            improved, stop = stopping.observe(record["validation"]["MAE"])
+            history.append({"epoch": epoch, **record, "improved": improved, "bad_epochs": stopping.bad_epochs})
+            if improved:
+                best_checkpoint = Path(directory) / "checkpoints" / f"epoch-{epoch:04d}"
+                runtime.save(best_checkpoint)
+            if not bar.disable:
+                rates = "/".join(f"{group['lr']:.3g}" for group in runtime.trainer.optimizer.param_groups)
+                bar.set_postfix(train_loss=f"{record['training']['huber']:.4f}", lr=rates,
+                                optimizer_steps=runtime.trainer.optimizer_steps, refresh=False)
+            bar.update()
+            if stop:
+                bar.set_description_str("Epochs (early stop)", refresh=False)
+                break
     if best_checkpoint is None:
         raise RunnerError("checkpoint_selection", "No valid validation checkpoint was selected")
     verify_restoration(runtime, best_checkpoint, best_epoch=stopping.best_epoch)

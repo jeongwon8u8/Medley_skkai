@@ -4,7 +4,7 @@
 
 ## Open
 
-- (없음)
+- 2026-11-19 — M1/M2/M3 터미널 진행률 통합을 위해 공통 trainer, training control, runner 및 Medley 의존성에 tqdm 표시 추가 요청. 기존 입력·반환 타입, split, checkpoint 계약 유지. 브랜치 작업 지시로 범위 확인.
 
 ## Resolved
 

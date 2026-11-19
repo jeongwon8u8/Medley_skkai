@@ -15,6 +15,7 @@ from .clinical_serializer import ClinicalTextSerializer
 from .clinical_tokenization import ClinicalTokenizer
 from .config import CLINICAL_REGRESSION_DEFAULTS
 from .data_adapter import SubjectSplit, validate_subject_partition
+from .progress import batch_count, progress_bar
 
 
 def seed_training(seed: int) -> None:
@@ -162,22 +163,28 @@ class ClinicalTrainer:
             self.optimizer.zero_grad(set_to_none=True)
 
         try:
-            for batch in loader:
-                ids, tokens, targets = self._batch(batch, self.train_subjects, seen)
-                with self._autocast():
-                    predictions = self._forward(tokens)
-                    loss = moca_huber_loss(predictions, targets, delta=self.config.settings["loss"]["huber_delta"],
-                                           reduction="sum")
-                loss.backward()
-                n = len(ids)
-                total_loss += float(loss.detach())
-                total_samples += n
-                group_samples += n
-                group_batches += 1
-                if group_batches == accumulation:
-                    step(group_samples)
-                    steps += 1
-                    group_samples, group_batches = 0, 0
+            with progress_bar("Training batches", total=batch_count(loader), unit="batch") as bar:
+                for batch in loader:
+                    ids, tokens, targets = self._batch(batch, self.train_subjects, seen)
+                    with self._autocast():
+                        predictions = self._forward(tokens)
+                        loss = moca_huber_loss(predictions, targets, delta=self.config.settings["loss"]["huber_delta"],
+                                               reduction="sum")
+                    loss.backward()
+                    n = len(ids)
+                    batch_loss = float(loss.detach())
+                    total_loss += batch_loss
+                    total_samples += n
+                    group_samples += n
+                    group_batches += 1
+                    if group_batches == accumulation:
+                        step(group_samples)
+                        steps += 1
+                        group_samples, group_batches = 0, 0
+                    if not bar.disable:
+                        bar.set_postfix(loss=f"{batch_loss / n:.4f}",
+                                        avg_loss=f"{total_loss / total_samples:.4f}", refresh=False)
+                    bar.update()
             if seen != set(self.train_subjects):
                 raise ValueError("Training loader omitted explicitly assigned subjects")
             if group_batches:
@@ -199,23 +206,35 @@ class ClinicalTrainer:
         was_training = self.model.training
         self.model.eval()
         rows, seen = [], set()
-        try:
-            with torch.no_grad():
-                for batch in loader:
-                    ids, tokens, targets = self._batch(batch, expected, seen)
-                    subgroups = batch["subgroups"]
-                    if len(subgroups) != len(ids) or any(s is not None and not isinstance(s, str) for s in subgroups):
-                        raise ValueError("Subgroup metadata must align with subjects")
-                    with self._autocast():
-                        predictions = self._forward(tokens)
-                    for sid, subgroup, y, p in zip(ids, subgroups, targets.cpu().tolist(), predictions.cpu().tolist()):
-                        rows.append({"seed": self.split.seed, "fold": self.split.fold, "subject": sid,
-                                     "subgroup": subgroup, "model": self._model_identifier(),
-                                     "y": y, "yhat": p, "target": y})
-        finally:
-            self.model.train(was_training)
-        if seen != set(expected):
-            raise ValueError("Evaluation loader omitted explicitly assigned subjects")
-        frame = pd.DataFrame(rows)
-        metrics = regression_metrics(frame.y.to_numpy(), frame.yhat.to_numpy())
+        with progress_bar(role.capitalize(), total=batch_count(loader), unit="batch") as bar:
+            try:
+                with torch.no_grad():
+                    for batch in loader:
+                        ids, tokens, targets = self._batch(batch, expected, seen)
+                        subgroups = batch["subgroups"]
+                        if len(subgroups) != len(ids) or any(s is not None and not isinstance(s, str) for s in subgroups):
+                            raise ValueError("Subgroup metadata must align with subjects")
+                        with self._autocast():
+                            predictions = self._forward(tokens)
+                        for sid, subgroup, y, p in zip(ids, subgroups, targets.cpu().tolist(), predictions.cpu().tolist()):
+                            rows.append({"seed": self.split.seed, "fold": self.split.fold, "subject": sid,
+                                         "subgroup": subgroup, "model": self._model_identifier(),
+                                         "y": y, "yhat": p, "target": y})
+                        bar.update()
+            finally:
+                self.model.train(was_training)
+            if seen != set(expected):
+                raise ValueError("Evaluation loader omitted explicitly assigned subjects")
+            frame = pd.DataFrame(rows)
+            metrics = regression_metrics(frame.y.to_numpy(), frame.yhat.to_numpy())
+            if not bar.disable:
+                summary = {key: f"{metrics[key]:.4f}" for key in ("MAE", "RMSE")}
+                if role == "validation":
+                    loss = torch.nn.functional.huber_loss(
+                        torch.from_numpy(frame.yhat.to_numpy(dtype=np.float32, copy=True)),
+                        torch.from_numpy(frame.y.to_numpy(dtype=np.float32, copy=True)),
+                        delta=self.config.settings["loss"]["huber_delta"],
+                    )
+                    summary["loss"] = f"{loss.item():.4f}"
+                bar.set_postfix(summary, refresh=False)
         return ClinicalEvaluation({k: metrics[k] for k in ("n", "MAE", "RMSE")}, frame)
