@@ -28,7 +28,7 @@ class Encoder:
 
 
 def build_encoder(cfg):
-    for mod in ("cbramod", "scerebro", "torch_module"):
+    for mod in ("cbramod", "scerebro", "torch_module", "lead"):
         importlib.import_module(f"{__name__}.{mod}")
     t = cfg.get("type")
     if t not in REGISTRY:

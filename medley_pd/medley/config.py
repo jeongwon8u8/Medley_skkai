@@ -80,13 +80,16 @@ def logspace(spec):
 
 def preprocess_spec(cfg):
     """피처 캐시가 어떤 전처리로 만들어졌는지 기록·비교하기 위한 사양 (데이터셋 + 공통 전처리 + 인코더 입력)"""
-    ds, enc, pp = cfg["dataset"], cfg["encoder"], cfg["preprocess"]
+    ds, enc = cfg["dataset"], cfg["encoder"]
+    pp = {**cfg["preprocess"], **(enc.get("preprocess") or {})}      # 인코더별 전처리 덮어쓰기 반영
     keys = ["type", "fs", "seg_sec", "amp_div", "channels", "module_file", "class_name", "checkpoint",
-            "weights", "init_kwargs", "input_layout", "patch_len", "pool", "forward_method", "reference", "arch"]
+            "weights", "init_kwargs", "input_layout", "patch_len", "pool", "forward_method", "reference", "arch",
+            "lead_arch"]
     spec = {
         "dataset": ds["name"], "condition": ds.get("condition"),
         "l_freq": pp["l_freq"], "h_freq": pp["h_freq"],
         "notch": pp.get("notch") or ds.get("line_freq"),
+        "rereference": pp.get("rereference"),
         "encoder": {k: enc.get(k) for k in keys if k in enc},
     }
     # 경로는 기기마다 달라지므로 비교에서는 파일 이름만 사용

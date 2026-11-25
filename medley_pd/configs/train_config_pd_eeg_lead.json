@@ -1,0 +1,66 @@
+{
+  "_설명": "2026-11-24 LEAD 실험 1~5 (seed 0 하나). eeg=실험1 Ridge, fusion_eeg_mlp=실험2, fusion_stack=실험3, fusion_ft_concat=실험4, fusion_ft_stack=실험5. 시간이 되면 seeds=[0,1,2,3,4]",
+  "_변수": "age, sex: 기본 정보 / updrs_part_iii, disease_duration, ledd, pigd_score, td_score: 운동·질병 정보 / ctt, updrs_total: 과제가 입력 금지로 정한 변수 (allow_excluded=true 일 때만 켤 수 있음, 누출 확인용)",
+  "dataset": "pd_eeg",
+  "encoder": "lead",
+  "task": "moca",
+  "experiment_name": "lead_s5",
+  "seeds": [0, 1, 2, 3, 4],
+  "overwrite": false,
+  "max_segments": null,
+  "models": {
+    "baselines": {
+      "mean": true,
+      "noise": true
+    },
+    "eeg": true,
+    "clinical": true,
+    "fusion": {
+      "stack": true,
+      "concat": true,
+      "eeg_mlp": true,
+      "ft_concat": true,
+      "ft_stack": true
+    }
+  },
+  "fusion_params": {
+    "concat_pca": 32,
+    "nn_pca": 32,
+    "nn_hidden": 32,
+    "nn_dropout": 0.2,
+    "nn_token_dim": 8,
+    "nn_lr": 0.001,
+    "nn_wd": 0.01,
+    "nn_epochs": 400,
+    "nn_patience": 40,
+    "nn_val_frac": 0.2,
+    "nn_members": 5
+  },
+  "clinical_sets": {
+    "C0": {
+      "age": true,
+      "sex": true,
+      "updrs_part_iii": false,
+      "disease_duration": false,
+      "ledd": false,
+      "pigd_score": false,
+      "td_score": false,
+      "ctt": false,
+      "updrs_total": false
+    },
+    "C1": {
+      "age": true,
+      "sex": true,
+      "updrs_part_iii": true,
+      "disease_duration": true,
+      "ledd": true,
+      "pigd_score": false,
+      "td_score": false,
+      "ctt": false,
+      "updrs_total": false
+    }
+  },
+  "allow_excluded": false,
+  "limit": null,
+  "include_controls": false
+}

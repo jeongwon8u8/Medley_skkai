@@ -26,8 +26,9 @@ COMMON = {
     # 전처리 (기존 TDBRAIN·Mumtaz·PD-EEG 프로토콜과 동일. 인코더 입력 사양은 encoders/*.yaml)
     "preprocess": {
         "l_freq": 0.3,
-        "h_freq": 75.0,
+        "h_freq": 45.0,                   # 팀 통일 (2026-11-24): 75 → 45 Hz. 인코더 yaml 의 preprocess 로 덮어쓸 수 있음
         "notch": None,                    # None 이면 데이터셋의 line_freq (PD-EEG 50 Hz, Iowa 60 Hz)
+        "rereference": None,              # None: 기록 기준 유지 / "average": 평균 기준 (LEAD 사전학습 조건)
         "flag_uv": 100.0,                 # 품질 표시 기준 (구간 제외에는 쓰지 않음)
         "min_good_channels": 20,          # 보간에 쓸 최소 채널 수
     },

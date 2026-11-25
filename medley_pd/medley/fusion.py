@@ -90,3 +90,7 @@ class ConcatFusion(Fusion):
     def predict(self, F, C):
         X = np.column_stack([self.pca.transform(F), self.cs.transform(C)])
         return self.head.predict_proba(X)[:, 1] if is_clf(self.cfg) else self.head.predict(X)
+
+
+# 신경망 결합 모델 (eeg_mlp, ft_concat, ft_stack) 등록 — torch 는 학습할 때만 불러옴
+from . import fusion_nn  # noqa: E402,F401

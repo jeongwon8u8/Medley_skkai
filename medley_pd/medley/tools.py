@@ -17,6 +17,10 @@ CBRAMOD_HF = ("weighting666/CBraMod", "pretrained_weights.pth")
 BF_GIT = "https://github.com/pulp-bio/BioFoundation"
 BF_COMMIT = "361c017ce0018141391d068e85fd6352fa32a9ef"            # S-CEReBrO PR #18
 SCEREBRO_HF = ("PulpBio/S-CEReBrO", "S_CEReBrO.safetensors")
+LEAD_GIT = "https://github.com/DL4mHealth/LEAD"
+LEAD_COMMIT = "dddee9c94f13b83d76f41ac9d452a74f84a76c5b"        # 전처리·어댑터 검증 기준 (2026-10-31)
+LEAD_HF = ("YiheWang/LEAD", "checkpoints/LEAD/pretrain/LEAD/P-11-b1024-p50-g16-learnable-3D/"
+                            "nh8_el12_dm128_df256_seed41/checkpoint.pth")   # P-Base (사전학습만)
 
 
 def _run(cmd, cwd=None):
@@ -50,11 +54,27 @@ def run_setup(work, data=None, models=None):
         print(f"  [주의] BioFoundation 이 {head[:7]} 입니다 (기준 {BF_COMMIT[:7]}). 검증은 {BF_COMMIT[:7]} 기준")
     scw = hf_hub_download(*SCEREBRO_HF, local_dir=os.path.join(models, "S-CEReBrO"))
 
+    ld = os.path.join(models, "LEAD")                            # LEAD (TMLR 2026), CC BY-NC-SA 4.0
+    if not os.path.exists(os.path.join(ld, "models", "LEAD.py")):
+        if not os.path.exists(ld):
+            _run(["git", "clone", "-q", LEAD_GIT, ld])
+        _run(["git", "checkout", "-q", LEAD_COMMIT], cwd=ld)
+    head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ld, capture_output=True, text=True).stdout.strip()
+    if head != LEAD_COMMIT:
+        print(f"  [주의] LEAD 가 {head[:7]} 입니다 (기준 {LEAD_COMMIT[:7]}). git -C {ld} checkout {LEAD_COMMIT[:7]}")
+    try:
+        lw = hf_hub_download(*LEAD_HF, local_dir=ld)
+    except Exception as e:                                       # 파일 경로가 바뀌었을 때
+        lw = os.path.join(ld, *LEAD_HF[1].split("/"))
+        print(f"  [주의] LEAD 가중치 자동 다운로드 실패 ({e}).\n"
+              f"         https://huggingface.co/{LEAD_HF[0]} 에서 받아 {lw} 에 두세요")
+
     local = {
         "paths": {"data_root": data, "feature_root": os.path.join(work, "features"),
                   "result_root": os.path.join(work, "results")},
         "encoders": {"cbramod": {"repo": cb, "weights": cbw},
-                     "scerebro": {"repo": bf, "weights": scw}},
+                     "scerebro": {"repo": bf, "weights": scw},
+                     "lead": {"repo": ld, "weights": lw}},
     }
     if os.path.exists(LOCAL):
         old = yaml.safe_load(open(LOCAL, encoding="utf-8")) or {}

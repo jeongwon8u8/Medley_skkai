@@ -1,6 +1,6 @@
 """EEG 파일 찾기·읽기·전처리 (기존 노트북 load_raw / preprocess 를 데이터셋·인코더 설정으로 일반화)
 
-공통: reference 유지 → 채널 이름으로 선택(10-20 옛 이름 T3/T4/T5/T6 → 10-10) → 없는/평평한 채널 보간
+공통: reference 유지(인코더 설정에 따라 평균 기준) → 채널 이름으로 선택(10-20 옛 이름 T3/T4/T5/T6 → 10-10) → 없는/평평한 채널 보간
      → l_freq–h_freq 대역통과 → line_freq 노치 → 인코더 fs로 리샘플링 → seg_sec 비중첩 구간 → μV / amp_div
 """
 import fnmatch
@@ -93,11 +93,20 @@ def check_encoder_spec(enc):
         raise ValueError(f"인코더 '{enc['name']}' 입력 사양이 비어 있습니다: {miss} → configs/encoders/{enc['name']}.yaml")
 
 
+def effective_preprocess(cfg):
+    """공통 전처리(configs/config.py)에 인코더 yaml 의 preprocess 를 덮어쓴 값 (예: LEAD 0.5–45 Hz, 평균 기준)"""
+    return {**cfg["preprocess"], **(cfg["encoder"].get("preprocess") or {})}
+
+
 def preprocess(path, cfg):
     """반환: segs [N, C, T] (μV / amp_div, float32), flag [N] (100 μV 초과 구간), 정보 dict"""
-    pp, ds, enc = cfg["preprocess"], cfg["dataset"], cfg["encoder"]
+    pp, ds, enc = effective_preprocess(cfg), cfg["dataset"], cfg["encoder"]
     check_encoder_spec(enc)
     raw, interp = load_raw(path, enc["channels"], ds.get("ref_aliases", []), pp.get("min_good_channels", 20))
+    if pp.get("rereference") == "average":                    # 기준전극 채널(Cz/Pz)은 load_raw 에서 이미 보간됨
+        raw.set_eeg_reference("average", projection=False, verbose="ERROR")
+    elif pp.get("rereference") not in (None, "none"):
+        raise ValueError(f"지원하지 않는 rereference: {pp.get('rereference')} (None | 'average')")
     fs_orig = raw.info["sfreq"]
     h = min(pp["h_freq"], fs_orig / 2 - 1)
     raw.filter(pp["l_freq"], h, verbose="ERROR")
