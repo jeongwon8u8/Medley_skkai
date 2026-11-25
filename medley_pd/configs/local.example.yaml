@@ -12,3 +12,6 @@ encoders:
   scerebro:
     repo: /content/drive/MyDrive/medley_work/models/BioFoundation
     weights: /content/drive/MyDrive/medley_work/models/S-CEReBrO/S_CEReBrO.safetensors
+  lead:
+    repo: /content/drive/MyDrive/medley_work/models/LEAD          # git clone https://github.com/DL4mHealth/LEAD
+    weights: /content/drive/MyDrive/medley_work/models/LEAD/checkpoints/LEAD/pretrain/LEAD/P-11-b1024-p50-g16-learnable-3D/nh8_el12_dm128_df256_seed41/checkpoint.pth

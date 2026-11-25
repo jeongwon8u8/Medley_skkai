@@ -1,0 +1,38 @@
+# frozen LEAD (P-Base) — DL4mHealth/LEAD, TMLR 2026. 가중치 Hugging Face YiheWang/LEAD (CC BY-NC-SA 4.0)
+# 사전학습 조건에 맞춤: 19채널(10-20), 평균 기준, 0.5–45 Hz, 200 Hz, 2초(400샘플) 구간, 구간·채널별 z-score
+# 사전학습은 라벨 없는 대조학습 (질환 라벨·MoCA 미사용). Iowa(ds004584)·TDBRAIN 은 사전학습 데이터에 포함됨 → 주 평가는 PD-EEG
+name: lead
+type: lead
+fs: 200
+seg_sec: 2                     # 400샘플 = 패치 50 × 8개
+amp_div: 1.0                   # μV 그대로 두고, 인코더 안에서 구간·채널별 z-score (LEAD normalize_batch_ts 와 동일)
+channels: [Fp1, Fp2, F7, F3, Fz, F4, F8, T7, C3, Cz, C4, T8, P7, P3, Pz, P4, P8, O1, O2]
+
+# 공통 전처리(configs/config.py) 덮어쓰기 — LEAD 데이터 전처리(README b)와 동일
+preprocess:
+  l_freq: 0.5
+  h_freq: 45.0
+  rereference: average
+
+repo: null                     # git clone https://github.com/DL4mHealth/LEAD 경로 (configs/local.yaml 에서 지정)
+                               # 검증한 코드 버전: commit dddee9c94f13b83d76f41ac9d452a74f84a76c5b (2026-10-31) → git checkout 으로 맞출 것
+weights: null                  # .../P-11-b1024-p50-g16-learnable-3D/nh8_el12_dm128_df256_seed41/checkpoint.pth
+montage: standard_1005         # 전극 3D 좌표 (MNE)
+pool: channel                  # channel: 채널별 마지막 패치 토큰 → 19×128 = 2,432차원 (채널 평균 = encode() 의 128차원)
+                               # mean:    encode() 128차원
+batch_size: 256
+
+# scripts/LEAD/pretrain/LEAD/P-Base.sh 와 동일
+lead_arch:
+  e_layers: 12
+  n_heads: 8
+  d_model: 128
+  d_ff: 256
+  patch_len: 50
+  stride: 50
+  dropout: 0.1
+  activation: gelu
+  temporal_pos_type: learnable
+  channel_pos_type: 3D
+  use_sampling_embedding: true
+  sampling_rate_list: [200, 100, 50]
