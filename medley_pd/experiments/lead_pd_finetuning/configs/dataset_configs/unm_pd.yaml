@@ -1,0 +1,26 @@
+name: unm_pd
+dir: ds003490
+openneuro:
+  id: ds003490
+  tag: 1.1.0
+download_include:
+- participants.tsv
+- participants.json
+- dataset_description.json
+- '**/*task-Rest*'
+participants: pd_hc_participants.tsv
+columns:
+  subject: subject_uid
+  group: label_pd
+  label_pd: label_pd
+patient_regex: ^1$
+subgroup: null
+condition:
+- EO
+- EC
+file_ext:
+- set
+line_freq: 60
+ref_aliases: []
+reference: CPz
+clinical_sets: {}

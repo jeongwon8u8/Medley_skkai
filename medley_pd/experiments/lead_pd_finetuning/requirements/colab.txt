@@ -1,0 +1,6 @@
+# Keep the CUDA-enabled torch supplied by the Colab GPU runtime.
+mne==1.13.2
+einops==0.8.2
+huggingface_hub==1.33.0
+scikit-learn==1.6.1
+PyYAML

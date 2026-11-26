@@ -1,0 +1,16 @@
+name: pd_hc
+type: classification
+target: label_pd
+positive:
+  above: 0.5
+patients_only: false
+exclude:
+- label_pd
+- group
+- diagnosis
+- moca
+- moca_total
+- MMSE
+- ifs_total_score
+clinical_sets: {}
+cross_site_sets: {}

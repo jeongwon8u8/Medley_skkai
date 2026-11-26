@@ -1,0 +1,24 @@
+name: ucsd_pd
+dir: ds002778
+openneuro:
+  id: ds002778
+  tag: 1.0.5
+download_include:
+- participants.tsv
+- participants.json
+- dataset_description.json
+- '**/*task-rest*'
+participants: pd_hc_participants.tsv
+columns:
+  subject: subject_uid
+  group: label_pd
+  label_pd: label_pd
+patient_regex: ^1$
+subgroup: null
+condition: EO
+file_ext:
+- bdf
+line_freq: 60
+ref_aliases: []
+reference: null
+clinical_sets: {}
