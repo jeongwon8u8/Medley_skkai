@@ -1,0 +1,101 @@
+{
+  "experiment_name": "external_3cohort121_pd_hc_directed_cheb_seed0",
+  "seed": 0,
+  "fs": 200,
+  "seg_sec": 1,
+  "amp_div": 1,
+  "channels": [
+    "Fp1",
+    "Fp2",
+    "F7",
+    "F3",
+    "Fz",
+    "F4",
+    "F8",
+    "T7",
+    "C3",
+    "Cz",
+    "C4",
+    "T8",
+    "P7",
+    "P3",
+    "Pz",
+    "P4",
+    "P8",
+    "O1",
+    "O2"
+  ],
+  "filter": [
+    0.3,
+    45
+  ],
+  "reference": "preserve_source_reference_no_added_CAR",
+  "artifact": "retain_common_100uV_flag_no_amplitude_rejection",
+  "orders": [
+    1,
+    2,
+    3,
+    4,
+    5
+  ],
+  "mvar_ridge": 0.01,
+  "aic": "logdet_residual_plus_2_effective_df_with_common_start5",
+  "graph_band": "theta",
+  "lambda_proxy": 2,
+  "cheb_terms": 5,
+  "hidden_dims": [
+    64,
+    64,
+    64,
+    32,
+    32,
+    32,
+    16,
+    16,
+    16
+  ],
+  "head_hidden": 256,
+  "dropout": 0.2,
+  "attention_dropout": 0.1,
+  "epochs": 60,
+  "patience": 20,
+  "batch_size": 32,
+  "windows_per_patient_per_epoch": 4,
+  "lr": 0.001,
+  "pretrained": false,
+  "status": "ready",
+  "target": "label_pd",
+  "initialization": "random",
+  "validation_fraction": 0.2,
+  "split_stratification": "person_grouped_dataset_x_label",
+  "checkpoint_selection": "minimum_person_level_validation_BCE",
+  "prediction_aggregation": "mean_window_sigmoid_per_person",
+  "threshold": 0.5,
+  "normalization": "common_volts_to_microvolts_amp_div1_then_encoder_div100",
+  "notch": "dataset_line_frequency",
+  "expected_counts": {
+    "turku": {
+      "PD": 20,
+      "HC": 20
+    },
+    "ds003490": {
+      "PD": 25,
+      "HC": 25
+    },
+    "ds002778": {
+      "PD": 15,
+      "HC": 16
+    }
+  },
+  "source_versions": {
+    "turku": "OSF pehj9; pin file hashes",
+    "ds003490": "1.1.0",
+    "ds002778": "1.0.5"
+  },
+  "optimizer": "Adam",
+  "loss": "BCEWithLogitsLoss",
+  "patient_sampling": "4 windows uniformly per training person per epoch",
+  "time_budget_seconds": 1500,
+  "save_all_external_vectors": false,
+  "scope": "3 cohorts N121 PD60 HC61; BrainLat, PD-EEG and Iowa excluded"
+}

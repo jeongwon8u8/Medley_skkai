@@ -1,0 +1,19 @@
+{
+  "experiment_name": "clinical_ft_c0_c1_seed0_20261126",
+  "seed": 0,
+  "nn_token_dim": 8,
+  "nn_hidden": 32,
+  "nn_dropout": 0.2,
+  "nn_lr": 0.001,
+  "nn_wd": 0.01,
+  "nn_epochs": 400,
+  "nn_patience": 40,
+  "nn_val_frac": 0.2,
+  "nn_members": 5,
+  "min_delta": 0.00001,
+  "selection": "validation_standardized_Huber",
+  "aggregation": "flatten_tokens_then_MLP",
+  "missing": "team_learned_missing_token_with_zero_placeholder",
+  "device": "cpu",
+  "threads": 1
+}

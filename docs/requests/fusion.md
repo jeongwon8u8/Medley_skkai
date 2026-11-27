@@ -71,3 +71,8 @@ branch support, architecture-aware checkpoint identity, and C2/C3 integration.
 Preserve old defaults/tests, fixed splits, baseline predictions and caches.
 Numeric skip initially supports only M2 with predictor-only encoding and no
 fitted scaling; M1/M3 requests are rejected. No real experiment is authorized.
+
+
+## Architecture A FT 실행 (2026-11-27, 사용자 승인)
+
+외부121명 frozen GNN 벡터와 FT 두 projection 및 팀 RepresentationFusionHead를 재사용한다. 원격 클래스 본문을 출처 commit과 함께 fusion 소유 경로로 가져오고 LLM 모듈은 포함하지 않는다. 기존 raw Concat 기본 동작과 공유 split/평가/전처리는 유지한다. 테스트와 집계 문서만 함께 업로드하며 환자 데이터는 제외한다.
